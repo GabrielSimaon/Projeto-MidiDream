@@ -51,7 +51,8 @@ def mix_controls(prefix, settings=None, allow_mute=True):
         ("toms", "Tons / surdo"),
         ("hihat", "Chimbal"),
         ("cymbals", "Pratos"),
-        ("piano", "Piano principal"),
+        ("piano_solo", "Piano Solo"),
+        ("piano", "Piano base"),
     ]
     for index, (name, label) in enumerate(sliders):
         with (left, right)[index % 2]:
@@ -969,10 +970,11 @@ if st.session_state.get("last_result"):
         "karaoke.mid",
         "completo.mid",
         "instrumental.mid",
+        "piano_solo.mid",
+        "piano.mid",
         "bass.mid",
         "drums.mid",
         "vocals.mid",
-        "piano.mid",
         "guitar.mid",
         "other.mid",
     ]

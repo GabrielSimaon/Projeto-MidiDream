@@ -18,6 +18,7 @@ from typing import Callable
 
 import librosa
 import mido
+import pretty_midi
 
 # Garante acesso aos binários do FFmpeg caso não estejam no PATH global do sistema
 tools_candidates = [
@@ -1173,6 +1174,51 @@ def run_pipeline(
     if detected_words:
         detected_words = [w for w in detected_words if not is_chord_symbol(w.get("text", ""))]
 
+    # Detecção e separação de solos para a faixa dedicada "Piano Solo" (função exclusiva de solo no começo, meio e final)
+    try:
+        import pretty_midi
+        from solo_detector import detect_solo_intervals, split_piano_solo
+        solo_intervals = detect_solo_intervals(
+            duration=duration,
+            detected_words=detected_words,
+            guide_text=manual_lyrics,
+        )
+        solo_report = split_piano_solo(
+            piano_midi_path=midi_dir / "piano.mid",
+            other_midi_path=midi_dir / "other.mid",
+            solo_intervals=solo_intervals,
+            output_solo_path=midi_dir / "piano_solo.mid",
+            output_piano_path=midi_dir / "piano.mid",
+            bpm=float(bpm_override or 120.0),
+        )
+        if solo_report.get("solo_notes", 0) > 0:
+            _notify(
+                progress,
+                "solo",
+                f"PianoSolo ativado: {solo_report['solo_notes']} notas de solo isoladas "
+                f"(Começo: {solo_report['comeco_notes']}, Meio: {solo_report['meio_notes']}, Final: {solo_report['final_notes']}). "
+                f"Base de piano limpa sem notas de solo misturadas.",
+            )
+            # Recombina completo.mid incluindo a faixa dedicada Piano Solo
+            remap_channels(midi_dir / "piano_solo.mid")
+            remap_channels(midi_dir / "piano.mid")
+            comb = pretty_midi.PrettyMIDI(str(combined_out))
+            comb.instruments = [
+                i for i in comb.instruments
+                if i.name not in ("Piano", "Piano Solo", "PianoSolo")
+            ]
+            p_base_pm = pretty_midi.PrettyMIDI(str(midi_dir / "piano.mid"))
+            if p_base_pm.instruments:
+                comb.instruments.append(p_base_pm.instruments[0])
+            p_solo_pm = pretty_midi.PrettyMIDI(str(midi_dir / "piano_solo.mid"))
+            if p_solo_pm.instruments:
+                comb.instruments.append(p_solo_pm.instruments[0])
+            comb.write(str(combined_out))
+            remap_channels(combined_out)
+            make_instrumental(combined_out, midi_dir / "instrumental.mid")
+    except Exception as exc:
+        print(f"[aviso] Separação de Piano Solo: {exc}")
+
     # Etapa 5: converte palavras em eventos de sílabas e exporta MIDI/KAR.
     lyric_events, plain_lyrics, lyric_method = build_lyric_events(
         detected_words=detected_words,
@@ -1280,6 +1326,7 @@ def run_pipeline(
         "combined_mid": combined_out,
         "karaoke_mid": midi_dir / "karaoke.mid" if karaoke_created else None,
         "karaoke_kar": midi_dir / "karaoke.kar" if karaoke_created else None,
+        "piano_solo_mid": midi_dir / "piano_solo.mid" if (midi_dir / "piano_solo.mid").is_file() else None,
         "events_path": events_path,
         "include_stems": include_stems_in_zip,
         "lyrics_txt": lyrics_txt if lyrics_txt.exists() else None,

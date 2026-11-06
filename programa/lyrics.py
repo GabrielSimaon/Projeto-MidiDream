@@ -408,6 +408,8 @@ def remap_channels(midi_path: str | Path) -> None:
             channel = 0
         elif any(k in name for k in ("vocal", "choir", "voice", "voz")):
             channel = 1
+        elif "solo" in name and any(k in name for k in ("piano", "teclado", "keys")):
+            channel = 8
         elif any(k in name for k in ("piano", "keyboard", "teclado")):
             channel = 2
         elif any(k in name for k in ("guitar", "guitarra", "viol")):

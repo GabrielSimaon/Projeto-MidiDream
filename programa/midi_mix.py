@@ -14,6 +14,7 @@ DEFAULT_MIX = {
     "hihat": 110,
     "cymbals": 110,
     "piano": 105,
+    "piano_solo": 115,
     "other": 70,
     "punch": 70,
     "mute_other": False,
@@ -36,7 +37,7 @@ def validate_mix(settings=None):
     if "other" not in settings and "mute_other" in settings:
         settings["other"] = 0 if settings["mute_other"] else 100
     values = {**DEFAULT_MIX, **settings}
-    for name in ("bass", "drums", "kick", "snare", "toms", "hihat", "cymbals", "other", "piano"):
+    for name in ("bass", "drums", "kick", "snare", "toms", "hihat", "cymbals", "other", "piano", "piano_solo"):
         if name in values:
             value = float(values[name])
             if not math.isfinite(value) or not 0 <= value <= 150:
@@ -67,6 +68,8 @@ def mix_midi(midi, settings):
             desired[0] = min(127, round(100 * values["bass"] / 100))
         if 9 in channels:
             desired[9] = min(127, round(100 * values["drums"] / 100))
+        if 8 in channels:
+            desired[8] = min(127, round(100 * values.get("piano_solo", 115) / 100))
         for ch in channels & {2, 5}:
             desired[ch] = min(127, round(100 * values.get("piano", 105) / 100))
         for ch in channels & {4, 6, 7}:
@@ -76,20 +79,30 @@ def mix_midi(midi, settings):
             if msg.is_meta:
                 continue
             if msg.type == "control_change" and msg.control == 7 and msg.channel in desired:
-                msg.value = (
-                    min(
-                        127,
-                        round(
-                            msg.value
-                            * (values["bass"] if msg.channel == 0 else (values["drums"] if msg.channel == 9 else (values.get("piano", 105) if msg.channel in (2, 5) else values.get("other", 70))))
-                            / 100
-                        ),
+                val_pct = (
+                    values["bass"]
+                    if msg.channel == 0
+                    else (
+                        values["drums"]
+                        if msg.channel == 9
+                        else (
+                            values.get("piano_solo", 115)
+                            if msg.channel == 8
+                            else (
+                                values.get("piano", 105)
+                                if msg.channel in (2, 5)
+                                else values.get("other", 70)
+                            )
+                        )
                     )
+                )
+                msg.value = (
+                    min(127, round(msg.value * val_pct / 100))
                     if msg.channel not in (4, 6, 7) or values["other"] > 0
                     else 0
                 )
                 existing.add(msg.channel)
-            if msg.type == "program_change" and msg.channel in (2, 5):
+            if msg.type == "program_change" and msg.channel in (2, 5, 8):
                 msg.program = values["piano_program"]
             if msg.type == "note_on" and msg.velocity > 0:
                 gain = 1.0
@@ -99,6 +112,8 @@ def mix_midi(midi, settings):
                     msg.velocity = _punch(msg.velocity, PUNCH_FLOOR["kick"], values["punch"])
                 if msg.channel == 0:
                     gain = 1 + (values["bass"] - 100) / 200
+                elif msg.channel == 8:
+                    gain = values.get("piano_solo", 115) / 100
                 elif msg.channel in (2, 5):
                     gain = values.get("piano", 105) / 100
                 elif msg.channel in (4, 6, 7):

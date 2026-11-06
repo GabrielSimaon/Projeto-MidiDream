@@ -27,11 +27,12 @@ import pretty_midi
 # Canal 6: Other / Acompanhamento (Piano 2 / Synth)
 STEM_CHANNELS = {
     "bass": 0,
-    "drums": 9,
+    "vocals": 1,
+    "piano": 2,
     "guitar": 3,
-    "vocals": 4,
-    "piano": 5,
-    "other": 6,
+    "other": 4,
+    "piano_solo": 8,
+    "drums": 9,
 }
 
 
@@ -69,7 +70,7 @@ def calculate_relative_volumes(
         default_other = 65 if lower_second_piano else 75
         if other_volume_override is not None:
             default_other = other_volume_override
-        return {"piano": 105, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
+        return {"piano": 105, "piano_solo": 115, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
 
     rms_levels = {}
     for name in ("piano", "other", "guitar", "bass", "drums", "vocals"):
@@ -84,7 +85,7 @@ def calculate_relative_volumes(
         default_other = 65 if lower_second_piano else 75
         if other_volume_override is not None:
             default_other = other_volume_override
-        return {"piano": 105, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
+        return {"piano": 105, "piano_solo": 115, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
 
     # Referência melódica/harmônica principal: piano ou guitarra
     ref_lead = max(rms_levels.get("piano", 0.0), rms_levels.get("guitar", 0.0), 0.01)
@@ -123,6 +124,7 @@ def calculate_relative_volumes(
     volumes["bass"] = 112
     volumes["drums"] = 110
     volumes["vocals"] = 100
+    volumes["piano_solo"] = 115
 
     return volumes
 
@@ -137,10 +139,22 @@ def _mix_tracks(midi: mido.MidiFile, volumes: dict[str, int]) -> bool:
         ch = channels[0]
 
         target_vol = None
-        for stem_name, stem_ch in STEM_CHANNELS.items():
-            if ch == stem_ch:
-                target_vol = volumes.get(stem_name, 100)
-                break
+        if ch == 0:
+            target_vol = volumes.get("bass", 112)
+        elif ch == 9:
+            target_vol = volumes.get("drums", 110)
+        elif ch in (2, 5):
+            target_vol = volumes.get("piano", 105)
+        elif ch == 8:
+            target_vol = volumes.get("piano_solo", 115)
+        elif ch == 3:
+            target_vol = volumes.get("guitar", 90)
+        elif ch in (4, 6, 7):
+            target_vol = volumes.get("other", 65)
+        elif ch == 1:
+            target_vol = volumes.get("vocals", 100)
+        else:
+            target_vol = 100
 
         if target_vol is not None:
             has_cc7 = False

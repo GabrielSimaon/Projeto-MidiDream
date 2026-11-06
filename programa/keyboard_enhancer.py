@@ -300,13 +300,21 @@ def enhance_keyboards(
     # Atualiza completo.mid
     if combined_path.is_file():
         comb = pretty_midi.PrettyMIDI(str(combined_path))
-        # Remove faixas antigas de piano e other
+        # Remove faixas antigas de piano e other (preserva faixas independentes)
         comb.instruments = [
             i for i in comb.instruments
-            if i.name != "Piano" and "other" not in i.name.casefold() and "acompanhamento" not in i.name.casefold()
+            if i.name not in ("Piano", "Piano Solo", "PianoSolo") and "other" not in i.name.casefold() and "acompanhamento" not in i.name.casefold()
         ]
         comb.instruments.append(enhanced_piano_inst)
         comb.instruments.append(enhanced_other_inst)
+        solo_path = midi_dir / "piano_solo.mid"
+        if solo_path.is_file():
+            try:
+                solo_pm = pretty_midi.PrettyMIDI(str(solo_path))
+                if solo_pm.instruments:
+                    comb.instruments.append(solo_pm.instruments[0])
+            except Exception:
+                pass
         comb.write(str(combined_path))
 
         # Atualiza instrumental.mid

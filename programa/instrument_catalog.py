@@ -5,6 +5,7 @@ EXTRA = {
     "accordion": (21, "Accordion", 5),
     "acoustic_guitar": (25, "Acoustic Guitar", 6),
     "electric_guitar": (27, "Electric Guitar", 7),
+    "piano_solo": (0, "Piano Solo", 8),
 }
 
 
@@ -16,6 +17,10 @@ def extra_kind(name):
         return "acoustic_guitar"
     if "electric_guitar" in name or "electric guitar" in name:
         return "electric_guitar"
+    if "solo" in name and any(k in name for k in ("piano", "teclado", "keys")):
+        return "piano_solo"
+    if name in ("piano solo", "pianosolo", "piano_solo"):
+        return "piano_solo"
     return None
 
 
