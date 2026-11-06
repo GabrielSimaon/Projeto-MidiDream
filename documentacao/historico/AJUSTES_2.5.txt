@@ -1,0 +1,30 @@
+YouTube MIDI Studio 2.5 — MIXAGEM, TECLADO E LETRA
+
+ATUALIZAR
+Feche a versão antiga, extraia todo este ZIP e abra YouTube MIDI Studio.exe. O iniciador é o mesmo; os módulos do programa foram atualizados. Não precisa usar terminal.
+
+VOLUME
+Padrões: baixo 115%, bateria geral 112%, bumbo/caixa/chimbal/pratos 110%.
+Ajuste "Volumes e timbre (MIDI)" antes de converter.
+Para conversões prontas, recupere pelo histórico, abra "Ajustar volumes desta conversão — sem converter de novo", ajuste e clique "Aplicar volumes e atualizar downloads".
+O ajuste muda volume MIDI (CC7) e intensidade das notas, com limites válidos de 0 a 127. Não é ganho do WAV em decibéis; o som depende do sintetizador/SoundFont do leitor. Notas que já estejam no máximo não podem ultrapassar 127.
+Os arquivos de referência sem mixagem ficam em resultados/midi_originais. Aplicações repetidas partem desses originais, evitando acumular ganho.
+100% mantém intensidade/volume de referência; desmarque "Silenciar mistura residual" para voltar a ouvir Outros.
+
+TECLADO
+O grupo Outros era convertido em piano, embora misture diversos instrumentos. Agora fica silenciado por padrão, com as notas preservadas. Se faltar um instrumento, desmarque "Silenciar mistura residual (Outros)".
+A opção "Separar piano/violão para melhorar o teclado (mais lento)" usa htdemucs_6s, mesmo com o perfil Rápido selecionado. Ela inicia marcada na interface quando a fonte permite separar áudio.
+A saída de piano tem limiares mais conservadores para reduzir notas espúrias. Isso pode perder notas fracas e não garante reproduzir o arranjo da referência.
+O modelo de piano é experimental. Para maior precisão, envie uma faixa de teclado já isolada em Faixas separadas e classifique-a como Piano / teclado.
+Você pode escolher o timbre da faixa de teclado: piano, piano elétrico, órgão ou sanfona. Mudar o timbre não corrige notas erradas.
+O modo Express permanece uma mistura única e não silencia Outros automaticamente.
+
+LETRA
+A interface inicia com Whisper small e busca mais precisa, independente do perfil rápido dos instrumentos. "Priorizar precisão da letra" pode aumentar o tempo de reconhecimento e o uso de memória. Pode desmarcar e selecionar tiny/base para maior velocidade.
+Segmentos com indício combinado de silêncio e transcrição muito incerta são descartados; isso não elimina todos os erros em canto.
+Cole a letra correta ou importe um .txt (UTF-8 ou Windows-1252). Esse texto tem prioridade; o reconhecimento serve como âncora temporal e não substitui as palavras fornecidas. Tempos por sílaba continuam aproximados e podem ser revisados no editor.
+O cache de reconhecimento foi renovado para não reaproveitar a letra antiga sob as novas configurações.
+
+VALIDAÇÃO
+61 testes passaram, incluindo volume de baixo e peças da bateria, preservação temporal, ajustes repetidos, revisão de letra seguida de remixagem e seleção efetiva de seis stems no perfil rápido. A interface de remixagem foi verificada automaticamente.
+Não foi feita comparação auditiva com a música do usuário: faltam o áudio e o MIDI gerado. O piano e o reconhecimento cantado continuam sujeitos a erros. Iniciador Windows reaproveitado; não executado em Windows neste ambiente.

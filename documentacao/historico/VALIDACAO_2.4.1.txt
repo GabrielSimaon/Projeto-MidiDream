@@ -1,0 +1,1 @@
+55 testes passaram; teste adicional confirmou que falha de gravação do relatório não cancela completo.mid. Testes de regressão cobrem notas com pitch NumPy int64 e segmentos recortados serializados em JSON. O iniciador da versão anterior foi mantido.

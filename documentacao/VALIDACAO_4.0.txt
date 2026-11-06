@@ -1,0 +1,12 @@
+Validação 4.0
+
+148 testes de regressão + 45 subtestes passaram no primeiro conjunto.
+Os 5 testes que dependiam de PyTorch passaram após instalar a dependência de teste.
+4 testes novos: pasta persistente, proteção contra sobrescrita, integridade/cobertura
+do SoundFont, áudio antigo removido em falhas e renderização real de instrumentos.
+Renderização real: piano, sanfona, violão, guitarra, baixo, bateria, voz e MP3.
+FluidSynth Linux 2.3.4 usado na validação; Windows acompanha FluidSynth 2.6.1.
+Streamlit AppTest: interface inicial, mudança da pasta, stems e modo somente letra.
+Iniciador Windows recompilado a partir do fonte com versão 4.0 e ícone/manifesto.
+Seletor nativo e executáveis Windows não foram executados neste ambiente Linux.
+Transcrição completa de uma música real não foi repetida nesta alteração.

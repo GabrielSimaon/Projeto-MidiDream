@@ -1,0 +1,31 @@
+﻿ENTRADAS DO PROGRAMA - VERSAO 2.0.3
+
+Na lateral da interface, escolha uma das tres opcoes:
+
+LINK DO YOUTUBE
+Cole o link. As opcoes de sessao do navegador continuam disponiveis.
+
+ARQUIVO MP3 / AUDIO
+Selecione uma musica completa em MP3, WAV, FLAC, M4A ou outro formato aceito.
+A opcao Separar instrumentos fica ativada por padrao para criar as pistas.
+
+FAIXAS SEPARADAS
+Selecione todos os arquivos de audio de uma vez. O programa nao executa Demucs.
+Para cada arquivo, confira o instrumento indicado abaixo do seletor:
+Voz, Baixo, Bateria, Piano / teclado, Guitarra / violao ou Outros instrumentos.
+Pode usar nomes quaisquer: a escolha na interface identifica o instrumento.
+Nao precisa enviar o MP3 completo junto nem todas as categorias.
+Uma unica faixa isolada tambem e aceita.
+
+Se enviar varios arquivos do mesmo grupo (por exemplo, duas guitarras),
+eles sao reunidos automaticamente antes da transcricao para MIDI.
+Essa reuniao nao separa instrumentos nem executa o modelo de demixing.
+O MIDI final possui uma pista por grupo de instrumentos.
+
+IMPORTANTE: todas as faixas devem comecar no mesmo ponto da musica.
+Preserve o silencio inicial para manter instrumentos e letra sincronizados.
+Sem uma faixa de voz, o reconhecimento automatico da letra e ignorado;
+o programa continua gerando o MIDI instrumental.
+
+Para atualizar: feche o programa antigo, extraia o ZIP novo e abra o EXE.
+A instalacao e os modelos existentes sao reaproveitados.

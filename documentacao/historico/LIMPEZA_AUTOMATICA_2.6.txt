@@ -1,0 +1,35 @@
+YouTube MIDI Studio 2.6 — LIMPEZA AUTOMÁTICA DE BAIXO E GUITARRA
+
+COMO USAR
+Feche a versão antiga, extraia todo este ZIP e abra YouTube MIDI Studio.exe.
+Envie o MP3 ou link normalmente e processe. "Limpeza automática de baixo e guitarra" já inicia em Automática (recomendada). Não precisa editar as notas manualmente.
+É necessário converter novamente para aplicar esta etapa. Os stems em cache podem ser reaproveitados. A transcrição MIDI tem uma chave nova para evitar reaproveitar as notas antigas sem limpeza.
+
+O QUE O PROGRAMA FAZ
+- Compara a intensidade de cada nota com a região próxima, evitando usar um limiar global que apague passagens suaves.
+- Penaliza notas curtas e fracas e usa a prominência espectral da frequência prevista como evidência auxiliar.
+- Recusa notas quando o áudio do trecho está praticamente silencioso.
+- No baixo, atenua candidatos que aparentam ser harmônicos de uma nota grave e seleciona uma linha solo, com no máximo uma nota por vez.
+- Na guitarra/violão, mantém acordes de até seis notas simultâneas em vez de dezenas de sobreposições.
+- Não cria alturas novas, não força uma tonalidade e mantém os ataques das notas escolhidas. Pode encurtar sustains conflitantes.
+- Notas recusadas no ataque não voltam a tocar mais tarde como rearticulações falsas.
+Voz, bateria, piano e Outros não passam por esta etapa. Volumes e tratamento de karaokê seguem as opções anteriores.
+
+CONTROLES E LIMITES
+Suave: permite duas notas de baixo e até oito na guitarra e usa filtros menos restritivos.
+Desativada: preserva o resultado da transcrição anterior a esta limpeza.
+O modo Automática pressupõe um baixo solo e uma guitarra/violão de seis cordas. Pode remover notas legítimas de baixo dobrado, vários violões, instrumentos com mais cordas ou passagens muito rápidas. Se isso acontecer, use Suave ou Desativada e processe novamente.
+Picos espectrais e notas MIDI não bastam para garantir fidelidade total ao arranjo. A identificação de harmônicos é heurística; não equivale a reconhecer com certeza o instrumento executado.
+
+RESULTADOS
+A tela mostra a contagem de notas e o máximo simultâneo antes/depois. relatorio_limpeza.json acompanha a conversão.
+Os MIDIs antes da limpeza ficam em motor_midi/antes_limpeza dentro da execução que fez a inferência. Eles não são alterados pelo filtro. Em conversões recuperadas exclusivamente do cache, essa pasta pode não existir.
+resultados/midi_originais continua significando "antes dos ajustes de volume", não antes da limpeza de notas.
+
+VALIDAÇÃO
+74 testes automatizados passaram, incluindo seleção de fundamental, preservação de acordes, passagens suaves, ataques curtos fortes, ausência de rearticulações falsas, silêncio e integração com o motor MIDI.
+A interface inicia no modo Automática; o modo Suave foi verificado.
+Também foi testado o trecho 00:45–01:09 do MP3 e MIDI fornecidos pelo usuário. Nesse trecho, o baixo passou de 786 para 184 notas, com máximo simultâneo 9→1; guitarra passou de 2145 para 778, com máximo 17→6. Isso mede o efeito do filtro, não prova acerto musical.
+Para a evidência acústica desse teste foi usado Demucs htdemucs em quatro grupos: baixo isolado e grupo Outros como aproximação da guitarra. Não foi usado um stem de guitarra isolado nesse ensaio e não houve uma nova rodada completa de Basic Pitch para a música inteira. A verificação automática não substitui comparação auditiva com referência.
+O teste do filtro levou aproximadamente dois segundos para o trecho neste ambiente, excluindo separação e transcrição; o tempo no computador do usuário pode variar.
+Iniciador Windows reaproveitado; não executado em Windows neste ambiente.

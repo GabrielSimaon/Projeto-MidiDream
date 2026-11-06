@@ -1,0 +1,69 @@
+VERSAO DESKTOP 2.1.0
+
+- Executavel nativo Windows x64 compilado em C (PE32+, subsystem Windows GUI).
+- Icone, manifest e recursos de versao incorporados.
+- Dependencias DLL do iniciador: bibliotecas do proprio Windows/UCRT.
+- CreateProcess com CREATE_NO_WINDOW; instalacao sem shell.
+- Ambiente Python privado gerenciado por uv, sem registro/PATH de usuario.
+- Resolucao das dependencias para Python 3.11/Windows: passou.
+- 10 testes de MIDI/DSP/exportacao: passaram.
+- Interface inicial e com editor/resultados: sem excecoes no AppTest.
+- Inicializacao real do servidor Streamlit local e sinal de abertura: passou no Linux.
+- Encerramento e limpeza do sinal temporario: passaram no Linux.
+- Extracao restrita de binarios e rejeicao de checksum incorreto: passaram.
+
+Nao foram executados neste ambiente: EXE em Windows, instalacao completa
+Windows, downloads reais dos modelos e transcricao completa de uma musica,
+exibicao do KAR no VanBasco.
+
+Dependencias externas baixadas de fontes oficiais dos projetos/distribuidores:
+https://github.com/astral-sh/uv
+https://docs.astral.sh/uv/guides/install-python/
+https://www.gyan.dev/ffmpeg/builds/
+https://github.com/denoland/deno/releases
+https://pypi.org/
+https://download.pytorch.org/whl/cpu
+https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+
+O programa nao inclui certificado comercial de assinatura de codigo.
+As licencas das dependencias continuam pertencendo aos respectivos projetos.
+
+CORRECAO 2.0.1: removido conflito entre UV_PYTHON_PREFERENCE e --managed-python.
+A combinacao corrigida foi exercitada pelo parser real do uv.
+
+CORRECAO 2.0.2:
+- Sessao de navegador opcional, desativada por padrao, sem exportar cookies.
+- Botao para atualizar yt-dlp na interface.
+- URLs de radio/playlist normalizadas para o video especifico.
+- Menos repeticoes e espacamento de consultas ao baixar.
+- Mensagens distintas para 429, login e falha na leitura de sessao.
+- 17 testes passaram; interface inicial e autorizacao de sessao passaram.
+- Sem teste de autenticacao pessoal ou liberacao de IP pelo YouTube.
+
+Fontes oficiais consultadas com GitHub e web:
+https://github.com/yt-dlp/yt-dlp/blob/master/README.md
+https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
+https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
+
+VERSAO 2.0.3:
+- Tres modos explicitos: YouTube, musica em MP3/audio e faixas prontas.
+- Identificacao de instrumento por arquivo na interface.
+- Faixas prontas pulam download e Demucs, incluindo uma unica faixa.
+- Arquivos do mesmo grupo sao reunidos automaticamente com FFmpeg.
+- Agrupamento mantem o ponto zero e a duracao da faixa mais longa.
+- Sem voz: reconhecimento de letra ignorado, sem bloquear o MIDI.
+- 21 testes passaram, incluindo agrupamento real de audio sintetico.
+- Interface dos modos MP3 e faixas prontas validada com AppTest.
+
+VERSAO 2.1.0:
+- 32 testes automatizados passaram.
+- Modelos Demucs reais carregados e comparados com audio sintetico de 12 s.
+- Worker real produziu as 4 faixas e eventos de progresso ate 100% no Linux.
+- Configuracao rapida aceita pelo parser real do Demucs 4.0.1.
+- YIN validado com tons de 440 Hz (voz) e 55 Hz (baixo).
+- Cache de stems, MIDI e letra evita repetir as respectivas etapas nos testes.
+- Cache incompleto/corrompido e rejeitado; parametros diferentes mudam a chave.
+- Previa real com FFmpeg limitada a 30 s sem modificar o audio de origem.
+- Barra de progresso da interface recebeu eventos e chegou a 100% no AppTest.
+- Perfil rapido/Express e modo de faixas prontas abriram sem excecoes no AppTest.
+- Windows e conversao musical completa com todos os modelos nao executados aqui.

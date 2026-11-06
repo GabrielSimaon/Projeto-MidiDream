@@ -1,0 +1,51 @@
+﻿YOUTUBE MIDI STUDIO 2.1.0 - OTIMIZACAO E PROGRESSO
+
+COMO ATUALIZAR
+Feche a janela da versao anterior. Extraia TODO este ZIP e abra o novo EXE.
+A instalacao e os modelos existentes sao mantidos. O novo separador rapido
+baixa seu proprio modelo (aproximadamente 160 MB) no primeiro uso.
+
+MODOS
+Rapido (padrao): separacao em 4 grupos com hdemucs_mmi, sem transformer,
+sem repeticoes de shift e com menos sobreposicao entre os trechos.
+Voz e baixo usam deteccao monofonica YIN, sem carregar IA para essas notas.
+Piano/guitarra/acompanhamento continuam com Basic Pitch polifonico.
+A bateria usa uma analise menor. A letra usa Whisper tiny por padrao e
+busca simplificada. Pode perder notas, coros, detalhes de bateria e precisao.
+
+Equilibrado: HTDemucs e transcricao polifonica; mais processamento.
+Maxima qualidade: preserva os modelos e as opcoes de qualidade anteriores.
+Express: pula a separacao e transcreve a musica misturada como uma pista.
+Nao e equivalente a ter os instrumentos isolados. Pode gerar mais notas falsas.
+No modo Faixas separadas, os grupos enviados continuam sendo processados.
+
+TESTE CURTO
+Marque Testar so os primeiros 30 segundos para avaliar rapidamente o resultado.
+Esse modo gera SOMENTE uma previa, sem cortar ou alterar o arquivo original.
+Desmarque para converter a musica completa.
+
+BARRA DE PROGRESSO
+A barra mostra o percentual da ETAPA ATUAL. Ela reinicia ao passar do download
+do modelo para a separacao, para o MIDI e para a letra. Isso e esperado.
+O percentual da separacao vem do Demucs. O de MIDI conta as faixas concluidas.
+O de letra acompanha o tempo de audio reconhecido. O tempo decorrido e mostrado
+junto da barra. Nao e uma previsao do tempo restante e nao e uma barra artificial.
+Uma faixa pesada pode levar mais tempo entre dois avancos de percentual.
+
+CACHE
+Ativado por padrao. Guarda separacao, notas MIDI e letra por conteudo do audio
+e parametros. Mudar apenas a resolucao MIDI ou editar a letra nao precisa
+repetir o que ja estiver no cache. Resultados interrompidos nao sao reutilizados.
+O cache desta versao comeca a ser preenchido nas novas conversoes. Ele ocupa
+disco em %LOCALAPPDATA%\YouTubeMidiStudio\cache_processamento.
+Desmarque a opcao para forcar uma nova analise.
+
+VALIDACAO DE VELOCIDADE
+Teste sintetico de 12 segundos, CPU Linux com 2 threads, apenas inferencia
+apos carregar os pesos: hdemucs_mmi = 5,614 s; htdemucs = 30,116 s.
+Este resultado nao mede uma conversao completa, qualidade musical ou seu PC.
+Nao e promessa de aceleracao fixa. Modelos diferentes e menor precisao fazem
+parte da troca por velocidade. Sem GPU, musicas longas ainda podem demorar.
+
+Outras mudancas: WAVs internos mono a 22050 Hz, busca binaria na quantizacao,
+controle de threads e saida dos processos transmitida durante a execucao.

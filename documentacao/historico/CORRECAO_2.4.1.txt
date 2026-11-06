@@ -1,0 +1,4 @@
+Corrigido: TypeError: Object of type int64 is not JSON serializable.
+O relatório do filtro vocal agora converte os números do NumPy para tipos padrão do Python. Uma falha ao gravar somente esse relatório também não cancela a geração do MIDI.
+Inclui as melhorias da versão 2.4: pastas com nome da música e opção de renomear conversões antigas pelo histórico.
+Feche o aplicativo antigo, extraia o ZIP completo e abra o executável. Execute a conversão novamente; a separação em cache pode ser reutilizada.

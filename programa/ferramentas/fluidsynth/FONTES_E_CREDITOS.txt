@@ -1,0 +1,5 @@
+FluidSynth 2.6.1: https://github.com/FluidSynth/fluidsynth/tree/v2.6.1
+Binários: https://github.com/FluidSynth/fluidsynth/releases/tag/v2.6.1
+libsndfile: https://github.com/libsndfile/libsndfile
+SDL3: https://github.com/libsdl-org/SDL
+Arquivos DLL podem ser substituídos por versões compatíveis.

@@ -1,0 +1,20 @@
+VERSÃO 2.3 — VOZ EM GRAVAÇÕES AO VIVO
+
+1. Extraia todo o ZIP, feche a versão antiga e abra YouTube MIDI Studio.exe.
+2. Use a música com separação de instrumentos ou envie as faixas e identifique a voz como Voz. O modo Express não isola a voz.
+3. Marque "Gravação ao vivo: reduzir notas da plateia".
+4. Comece pelo filtro Moderado. Use Forte se ainda houver notas espúrias; pode cortar mais voz do cantor.
+5. Se souber quando só a plateia canta, marque os trechos no campo apropriado, um por linha:
+01:20-01:28
+02:10-02:14
+Esses cortes funcionam mesmo com o filtro automático desmarcado e têm prioridade sobre ele.
+
+O QUE MUDA
+O filtro confere periodicidade na frequência de cada nota vocal. Sons sem altura clara podem ser removidos/recortados, sem mudar o andamento. Atua somente na faixa vocal; os instrumentos não são cortados. Os trechos manuais removem exatamente a guia vocal dentro dos intervalos indicados.
+O relatório relatorio_voz.json lista notas removidas/recortadas, notas restantes e intervalos manuais. Pode ser baixado na tela de resultados e vem no ZIP da conversão.
+Converta novamente para aplicar os ajustes. O cache distingue modo do filtro e trechos manuais; a separação pode continuar aproveitando stems anteriores.
+
+LIMITES
+Este é um filtro de periodicidade, não um classificador de plateia/cantor. Plateia cantando afinada ou em uníssono pode ser aceita. Voz rouca, gritos e voz com muitos efeitos podem ser removidos. O modo Forte exige mais periodicidade, mas não reconhece melhor a identidade de quem canta. Confira vocals.mid antes de usar ao vivo.
+MIDI contém notas e controles, não o áudio original: não consegue reproduzir o som real da plateia. Esta opção procura evitar notas espúrias e permite deixar a guia vocal em silêncio nos trechos de plateia, com a banda tocando normalmente.
+A transcrição da letra é independente; o filtro vocal não remove palavras do Whisper automaticamente.

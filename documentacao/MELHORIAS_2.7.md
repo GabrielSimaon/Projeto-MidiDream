@@ -1,0 +1,30 @@
+# Versão 2.7 — articulação, ritmo e referência musical
+
+## O que a comparação revelou
+A referência enviada tem acompanhamento único em guitarra/Outros, sem piano separado. Seus instrumentos usam uma grade de semicolcheias com fase consistente e notas mais longas. O baixo da referência também contém polifonia; limitar tudo a uma nota não reproduzia esse arranjo. A saída anterior juntava três problemas: notas fragmentadas, outro arranjo e dinâmica muito mais forte. A contagem de notas, isoladamente, não é uma medida confiável de fidelidade.
+
+## Mudanças
+- O modo **Musical** reúne fragmentos da mesma altura separados por até 80 ms, preservando ataques nitidamente mais fortes. Não aplica o limite rígido de polifonia do modo Solo. Pode juntar rearticulações suaves legítimas; se isso ocorrer, use outro tratamento ou desative a grade.
+- O arranjo **Compacto** reúne o acompanhamento em uma faixa de guitarra, evitando sobrepor piano e guitarra separados. É o padrão da interface; o arranjo Detalhado continua disponível.
+- A grade inicia em 16. O início e o fim dos instrumentos são alinhados à grade; isso altera ligeiramente o timing. Para preservar tempos detectados, selecione 0.
+- O BPM automático é refinado pelo ajuste linear dos pulsos detectados, somente quando a sequência é estável. A fase considera o atraso de uma janela de análise. No MP3 fornecido, a estimativa discreta de 161,499 foi refinada para 157,987 BPM, próxima aos 158 da referência. Músicas com rubato ou grandes mudanças de andamento continuam exigindo revisão; não há reconstrução completa do mapa de tempo do áudio.
+- O padrão de dinâmica é mais suave, sobretudo no acompanhamento e na guia vocal. Os controles de ganho da nova conversão iniciam em 100%, evitando reforço acumulado. Ajustes de conversões antigas são preservados.
+- A separação inicia em Equilibrado com quatro grupos. Rápido continua disponível; seis fontes ficam como opção do arranjo Detalhado.
+- A bateria usa maior sensibilidade aos ataques agudos, critérios mais exigentes de sustentação para crash e supressão de disparos repetidos muito próximos por peça. Continua sendo uma classificação aproximada por bandas, sem reconhecimento treinado de cada peça. Pode perder rolls rápidos. Não preenche batidas artificialmente apenas para igualar o arquivo de referência.
+
+## Referência instrumental
+A nova entrada aceita MIDI/KAR da mesma música. Ela extrai BPM quando constante, fase da grade quando regular, timbres, quantis de intensidade e uma escala diatônica de sete classes somente quando a referência sustenta essa leitura. Não copia a sequência de notas ou a letra; aproveita a organização geral (Compacto/Detalhado).
+Sem referência, não há escala ou BPM fixo de uma música específica. O preset padrão contém apenas timbres e dinâmica agregada. A escala extraída é opcional e pode ajustar em até um semitom notas instrumentais de baixa intensidade; referências erradas podem orientar notas erradas. A guia vocal mantém suas alturas e tempos detectados neste perfil.
+Uma referência com variações de tempo não impõe um BPM constante. BPM manual informado na interface tem prioridade sobre o BPM da referência. A fase da grade e a quantização precisam ser conferidas se houver gravações de versões diferentes.
+
+## Letra aprovada
+A entrada de karaokê aprovado lê eventos FF05 e seus tempos em segundos pelo mapa de andamento original. Ao exportar com outro PPQ/BPM, converte esses segundos para a nova divisão. Palavras e tempos não são substituídos pelo reconhecedor. Não é permitido escolher simultaneamente esse arquivo e o JSON de sílabas.
+O algoritmo de reconhecimento da letra não foi alterado nesta versão. Para manter exatamente a letra já aprovada, importe o seu karaoke.kar; reconhecer de novo a partir de outro stem pode produzir texto diferente.
+
+## Validação e limites
+83 testes passaram. A interface foi verificada com Musical, Compacto, grade 16, ganho 100% e as duas entradas de MIDI/KAR separadas. Os 441 eventos do KAR fornecido foram reexportados preservando o texto, com erro temporal máximo de 0,197 ms no teste a 960 PPQ.
+No ensaio com os candidatos do completo.mid anteriormente fornecido, o perfil extraído da referência reuniu o baixo de 4380 para 1370 notas, com duração mediana de 104,5 para 284,8 ms. O acompanhamento combinado passou de 23407 para 3240 notas e duração mediana de 92,9 para 189,9 ms. A referência possui 1342 notas de baixo e 2752 no acompanhamento. A proximidade estatística não prova acerto musical.
+No trecho 00:45–01:09 do áudio, usando um stem de bateria htdemucs em quatro grupos, a nova detecção encontrou 24 chimbais e 2 crashes; a saída anterior tinha 2 e 17, respectivamente, e a referência tinha 63 e 9. Esse ensaio verifica o efeito do classificador; a referência também tem erros e não é uma anotação de bateria verdadeira.
+Também foi concluído um teste integral: separação htdemucs de quatro fontes da música inteira e inferência Basic Pitch 0.4.0 com o modelo ICASSP no backend ONNX/CPU. O teste usou o perfil do primeiro MIDI, grade 16, dinâmica em 100% e a letra do KAR aprovado. Gerou 1353 notas de baixo, 2838 de acompanhamento, 529 de bateria e 3458 de guia vocal. O arquivo ficou em formato 1 a 960 PPQ, com BPM próximo de 158. A letra manteve os 441 eventos e o desvio temporal máximo foi 0,196 ms. O contador de notas não comprova fidelidade musical; a guia vocal ainda contém fragmentação e a bateria ainda pode classificar ataques incorretamente.
+A separação levou aproximadamente 75 s e a etapa seguinte aproximadamente 18 s neste ambiente. Isso não é promessa de tempo para outro computador. O Windows usa o backend TensorFlow instalado pelo iniciador; o ensaio completo foi em Linux/ONNX, portanto podem ocorrer diferenças numéricas. Iniciador Windows reaproveitado; sem execução em Windows neste ambiente.
+O runtime ONNX do teste e os subprocessos do programa são iniciados com ORT_DISABLE_TELEMETRY=1, antes da inicialização, e a API de desativação é chamada quando disponível. Modelos usados no teste já estavam disponíveis localmente. A fidelidade sonora precisa ser conferida ouvindo o arquivo gerado.

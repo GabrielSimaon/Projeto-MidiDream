@@ -1,0 +1,14 @@
+VERSÃO 2.5.1 — ÁUDIO NÃO ENCONTRADO APÓS MOVER/RENOMEAR PASTA
+
+Corrigida a recuperação de caminhos absolutos antigos. O estado das novas conversões também guarda caminhos relativos. Pastas renomeadas pelo aplicativo mantêm referências ao nome anterior para localizar uma sessão antiga.
+Quando há uma única correspondência, o programa localiza o MP3 dentro da pasta atual, incluindo nomes com acentos, espaços, & e colchetes.
+Se houver mais de uma cópia possível, não escolhe uma música arbitrariamente. Se o áudio foi apagado, os MIDIs existentes continuam disponíveis para download.
+
+COMO USAR
+1. Feche a versão anterior, extraia este ZIP completo e abra YouTube MIDI Studio.exe.
+2. Abra "Recuperar conversões já salvas" e selecione a música.
+3. Clique em "Abrir arquivos salvos". Se o MIDI já foi concluído, não precisa converter novamente para baixá-lo.
+4. Se a conversão não aparece ou se o MP3 foi apagado, envie o MP3 novamente pela interface. A separação em cache pode ser reaproveitada, quando disponível.
+
+Mantém os ajustes de volume, teclado, letra e modo ao vivo da versão 2.5.
+66 testes passaram, com regressões de caminhos Windows, pastas movidas, nomes com colchetes e áudio ausente. A recuperação e o download também foram verificados em teste da interface. Não executado em Windows neste ambiente; iniciador reaproveitado da versão anterior.

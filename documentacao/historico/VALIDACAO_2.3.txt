@@ -1,0 +1,4 @@
+49 testes passaram, incluindo ruído/voz sintética, silêncio, cortes manuais, cache e relatório.
+Interface: ativação de modo ao vivo e seleção Moderado/Forte passaram.
+Filtro de periodicidade em 30s de áudio sintético/quatro alturas: 0,233s neste ambiente; não é medição da conversão completa.
+Sem teste com gravação real do usuário. Executável compilado para Windows x64; não executado em Windows neste ambiente.

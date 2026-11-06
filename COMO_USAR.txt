@@ -1,0 +1,74 @@
+MidiDream 4.4
+
+1. Feche a versão antiga e extraia TODO o ZIP em uma pasta nova.
+2. Abra MidiDream.exe. A instalação e os modelos continuam automáticos.
+3. Clique em Escolher pasta. Navegue pelos discos e subpastas na própria tela
+   e clique em Usar esta pasta. Também pode digitar o caminho completo.
+   O destino é lembrado nos próximos usos. Cada música ganha uma subpasta.
+4. Envie o MP3/áudio completo ou as faixas separadas. A entrada YouTube foi removida.
+5. Informe BPM e letra com cifras e inicie a conversão.
+6. A opção Gerar MP3 com os samples incluídos vem ativada. Ela produz a música
+   completa, o instrumental e cada faixa MIDI disponível em resultados/audio_samples.
+   Esses arquivos também entram no ZIP da conversão e podem ser ouvidos na tela.
+
+SAMPLES E INSTRUMENTOS
+Banco incluído: GeneralUser GS 2.0.3, de S. Christian Collins.
+Cobre os 128 instrumentos General MIDI, incluindo piano, baixo, sanfona, violão,
+guitarra, voz e kits de bateria. Sintetizador: FluidSynth 2.6.1 para Windows x64.
+As licenças e os créditos acompanham o pacote. Não usa bibliotecas comerciais pagas.
+Não existe um banco universalmente melhor para todos os instrumentos.
+
+MIDI e KAR armazenam notas e controles, NÃO samples. Os MP3 gerados usam o banco
+incluído. No vanBasco, teclado ou outro player, o MIDI usa os timbres desse aparelho
+ou sintetizador. Para usar o mesmo banco num player compatível, carregue o arquivo
+programa/samples/GeneralUser-GS.sf2 no sintetizador desse player.
+Os samples melhoram o timbre da reprodução; não corrigem notas mal transcritas.
+
+O modo Colocar somente letra em MIDI também salva MIDI/KAR na pasta escolhida.
+A geração de áudio usa CPU e espaço adicional. Desative a opção de MP3 se quiser
+somente MIDI/KAR. Todos os arquivos salvos continuam disponíveis sem o navegador.
+
+CORREÇÕES 4.1
+O botão agora abre um navegador de pastas na própria interface, sem PowerShell.
+Em Pasta dos modelos e cache, pode escolher outro disco também para os modelos,
+cache e arquivos temporários. O destino dos modelos é lembrado.
+Os arquivos antigos NÃO são movidos automaticamente: ao escolher uma pasta nova,
+podem ser necessários novos downloads. O disco antigo continua com os arquivos.
+O erro LibsndfileError do log enviado ocorreu depois de faltar espaço no C:.
+Escolha um destino com espaço (vários GB para o primeiro uso dos modelos).
+
+CORREÇÃO 4.2
+Unidades inacessíveis ou sem sistema de arquivos reconhecido são ignoradas.
+Exemplo: um erro WinError 1005 em F: não impede a escolha de E:.
+Para usar E: em tudo, escolha E:\MIDI como saída e E:\MIDI\modelos como
+pasta dos modelos/cache. Os arquivos antigos não são movidos automaticamente.
+
+VERSÃO 4.4 — MÁXIMA QUALIDADE FIXA E NOTAS FIÉIS AO ÁUDIO
+O programa agora se chama MidiDream. Não há mais escolha de qualidade: a conversão
+sempre usa o melhor modo (separação Demucs htdemucs_ft, letra com Whisper medium,
+reconhecimento de instrumentos com conferência de timbre). A escala deixou de ser
+obrigatória e não é mais usada para trocar notas.
+
+Foram removidos da tela: modos Rápido/Equilibrado/Express, escolha de modelo Demucs,
+CPU/GPU, teste de 30 segundos, notas ultrarrápidas, letra "mais rápida", tamanho do
+Whisper, filtro desativável, escala, baixo no bumbo/violão no metrônomo, acompanhamento
+por cifras, grade/quantização e PPQ. Detalhes em documentacao/MELHORIAS_4.4.md.
+
+Cada conversão leva mais tempo que nas versões anteriores. No primeiro uso o modelo de
+letra "medium" (cerca de 1,5 GB) e o htdemucs_ft são baixados.
+
+Mantido da 4.3: faixas automáticas chamadas piano/guitarra são reanalisadas, e um
+conflito forte de timbre não é renomeado como outro instrumento (o áudio fica no resíduo).
+Faixas isoladas e identificadas pelo usuário continuam respeitando a identificação.
+
+O mixer das faixas separadas tem volume, Solo e Mute, com prévia sincronizada
+até 30 segundos. Ele toca os stems de áudio originais, antes da correção MIDI.
+Referência de fluxo: https://moises.ai/features/stem-separation/
+Os motores locais continuam Demucs + AudioSep + AST; não é o motor do Moises.
+
+Em Tocar o MIDI com os samples incluídos, selecione um MIDI e clique em Tocar.
+Esse player toca diretamente o MIDI com o SoundFont incluído; não é o MP3.
+Parar MIDI encerra a reprodução. O som sai no computador que executa o programa.
+O arquivo .mid continua sem samples embutidos, por definição do formato SMF.
+Ao abri-lo no vanBasco ou teclado, configure ali o sintetizador/banco desejado.
+O botão Baixar banco de samples SF2 facilita configurar um player compatível.

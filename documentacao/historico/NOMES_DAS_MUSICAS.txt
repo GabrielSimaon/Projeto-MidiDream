@@ -1,0 +1,12 @@
+VERSÃO 2.4 — PASTAS COM NOME DA MÚSICA
+
+Novas conversões: ao terminar, a pasta recebe o nome da música e data/hora.
+Exemplo: Minha Banda - Minha Música — 2026-10-16_18h50m00s
+O aplicativo usa o nome do MP3 ou o título baixado do YouTube. Você pode escolher outro no campo "Nome da música (opcional)". Para faixas separadas, informe o nome nesse campo.
+Caracteres incompatíveis com o Windows são limpos; nomes repetidos recebem um número sem sobrescrever arquivos.
+
+Pastas antigas: abra "Recuperar conversões já salvas", selecione a música, abra "Dar nome / renomear esta música", digite o nome e clique em "Renomear pasta desta música". Os arquivos continuam funcionando sem uma nova conversão.
+Quando possível, o histórico já mostra o nome do áudio original. Downloads antigos salvos apenas como musica.wav podem precisar do nome digitado por você.
+
+Extraia o ZIP inteiro e abra YouTube MIDI Studio.exe. As músicas continuam em AppData/Local/YouTubeMidiStudio/trabalhos.
+Durante o processamento, a pasta temporária ainda usa job_...; o nome definitivo é aplicado ao concluir. Se houver falha de processamento, o título fica registrado quando disponível para facilitar a identificação.

@@ -1,0 +1,29 @@
+YouTube MIDI Studio 2.2
+
+COMO ATUALIZAR
+Feche o aplicativo antigo, extraia todo este ZIP em outra pasta e abra YouTube MIDI Studio.exe. Não precisa usar comandos. A instalação de dependências existente é reaproveitada.
+
+QUALIDADE
+A estimativa ultrarrápida de voz e baixo agora é opcional. Deixe "Notas em modo ultrarrápido" desmarcado para usar Basic Pitch nestas faixas. Isso pode demorar mais. O perfil Rápido continua acelerando a separação.
+Bateria: critérios independentes para ataques simultâneos, maior sensibilidade a ataques fracos e velocidades mais dinâmicas. A classificação por bandas ainda é aproximada, principalmente para tons e percussão complexa.
+O cache MIDI foi renovado: converta outra vez para aplicar os ajustes. Stems em cache continuam reutilizáveis.
+Não há garantia de transcrição perfeita: vazamento entre stems, acordes densos, instrumentos e timbres afetam a detecção. A qualidade deve ser conferida ouvindo o MIDI.
+
+LETRA COM CIFRAS
+Cole no campo de letra:
+[C]Eu sigo [G]o caminho
+[Am]E volto para [F]casa
+
+Marque "Adicionar acompanhamento MIDI pelas cifras" para gerar uma pista de piano no canal 6, junto às faixas detectadas. Desmarcado, as cifras são apenas retiradas do texto cantado.
+Formatos: C, Dm, F#, Bb, G7, Cmaj7, Am7, Bdim, Caug, Dsus2, Gsus4, C/E.
+Para dar o tempo exato do acorde: [00:12.5 Am]texto.
+Sem tempos explícitos, os acordes seguem o alinhamento estimado das palavras; sem reconhecimento vocal, são distribuídos na duração. Cifras não especificam as notas da melodia e não corrigem automaticamente a afinação extraída.
+
+RECUPERAR E BAIXAR
+Use "Recuperar conversões já salvas" e "Abrir arquivos salvos". Não é necessário converter de novo para baixar.
+Os botões individuais aparecem antes do editor; o áudio completo não é carregado automaticamente. ZIPs grandes são preparados somente quando solicitados.
+Se o reconhecimento de letra falhar, o MIDI instrumental já fica salvo. Também pode abrir "Meus arquivos" no iniciador e procurar resultados/midi dentro da pasta job mais recente.
+Mantenha o iniciador aberto enquanto usa a interface.
+
+VALIDAÇÃO
+41 testes automatizados passaram e a tela inicial carregou sem exceções em teste de interface. Iniciador compilado para Windows x64, sem console. Não foi executado neste ambiente Windows nem validado com a música do usuário; as mudanças visam reduzir falhas, não assegurar resultado perfeito.

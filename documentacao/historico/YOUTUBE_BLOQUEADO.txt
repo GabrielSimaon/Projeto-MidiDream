@@ -1,0 +1,24 @@
+﻿ERRO 429 / CONFIRMACAO DE LOGIN DO YOUTUBE
+
+Esse erro vem do YouTube, antes de iniciar a conversao de MIDI.
+
+1. Abra o video no navegador e conclua a confirmacao/login que o YouTube pedir.
+2. Na interface do programa, marque Usar minha sessao do navegador.
+3. Selecione o MESMO navegador em que voce confirmou o acesso.
+4. Feche esse navegador e tente processar novamente.
+
+Firefox e a primeira opcao da lista. Chrome/Edge podem impedir a leitura
+local da sessao por causa da protecao do Windows. Nesse caso, use Firefox
+conectado ao YouTube ou envie o arquivo de audio pela interface.
+Nao e necessario digitar comandos nem exportar cookies.
+
+O botao Atualizar acesso ao YouTube atualiza o downloader sem reinstalar IA.
+O programa le a sessao apenas quando voce marca a opcao correspondente.
+Nao exporta os cookies para os resultados ou para o ZIP da musica.
+
+Se o YouTube continuar bloqueando, aguarde antes de repetir. Muitas tentativas
+seguidas podem manter o limite. Nao existe garantia de liberar todos os links.
+Enviar audio ou stems permite continuar o trabalho sem depender do download.
+
+Esta versao reaproveita o ambiente e os modelos ja instalados.
+Feche a janela antiga, extraia este ZIP e abra o novo EXE.

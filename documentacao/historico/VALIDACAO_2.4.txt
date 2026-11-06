@@ -1,0 +1,1 @@
+52 testes da suíte passaram; teste adicional de título do YouTube e mudança da pasta também passou, junto aos 3 testes de nomes (53 testes únicos). Renomeação pelo histórico verificada em teste de interface. O iniciador Windows foi reaproveitado da versão anterior; os módulos Python foram atualizados. Sem execução em Windows neste ambiente.
