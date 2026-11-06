@@ -123,3 +123,5 @@ flowchart TD
 
 ##  Status: Versão Alpha
 *Projeto sob autoria de Gabriel Simão. Código proprietário e privado para pesquisa e desenvolvimento em inteligência musical e processamento de áudio digital.*
+
+
