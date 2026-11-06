@@ -1,11 +1,11 @@
-# MidiDream 🎹✨
+# MidiDream 
 
-> **⚠️ VERSÃO ALPHA EM TESTES E DESENVOLVIMENTO ATIVO**  
+> ** VERSÃO ALPHA EM TESTES E DESENVOLVIMENTO ATIVO**  
 > O **MidiDream** está atualmente em estágio **Alpha**. Novos recursos, calibrações de inteligência musical e melhorias de precisão rítmica e harmônica estão sendo implementados e validados constantemente.
 
 ---
 
-## 🎯 O que é o MidiDream? (O que faz)
+##  O que é o MidiDream? (O que faz)
 
 O **MidiDream** é uma estação de trabalho inteligente projetada para transformar qualquer música — seja através de arquivos de áudio (`.mp3`, `.wav`, `.flac`, `.m4a`) ou via **links do YouTube** — em arranjos **MIDI multipista profissionais** e arquivos de **Karaokê sincronizados (`.kar` e `.mid`)** prontos para reprodução no **VanBasco**, sintetizadores General MIDI, teclados arranjadores e softwares de produção musical (DAWs).
 
@@ -22,7 +22,7 @@ O **MidiDream** é uma estação de trabalho inteligente projetada para transfor
 
 ---
 
-## ⚙️ Como o MidiDream Funciona? (Arquitetura e Processamento)
+##  Como o MidiDream Funciona? (Arquitetura e Processamento)
 
 O MidiDream opera através de uma pipeline modular de alta fidelidade:
 
@@ -72,7 +72,7 @@ flowchart TD
 
 ---
 
-## 🚀 Como Executar o Projeto
+##  Como Executar o Projeto
 
 ### Pré-requisitos:
 - Sistema Operacional: **Windows 10 / 11**
@@ -96,7 +96,7 @@ flowchart TD
 
 ---
 
-## 🗺️ Mapa dos Canais MIDI Padrão (GM)
+##  Mapa dos Canais MIDI Padrão (GM)
 
 | Canal (0-based) | Canal VanBasco | Instrumento | Função no Arranjo |
 |:---:|:---:|:---|:---|
@@ -110,7 +110,7 @@ flowchart TD
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+##  Tecnologias Utilizadas
 
 - **Linguagem**: Python 3.11
 - **Processamento de Áudio**: Librosa, SoundFile, NumPy, SciPy
@@ -121,5 +121,5 @@ flowchart TD
 
 ---
 
-## 📌 Status: Versão Alpha
+##  Status: Versão Alpha
 *Projeto sob autoria de Gabriel Simão. Código proprietário e privado para pesquisa e desenvolvimento em inteligência musical e processamento de áudio digital.*
