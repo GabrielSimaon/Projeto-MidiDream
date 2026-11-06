@@ -19,7 +19,7 @@ import mido
 
 from accompaniment_cleanup import key_scale
 from midi_timing import TempoMap
-from music_guide import chord_notes, chord_root_and_bass
+from music_guide import chord_notes, chord_root_and_bass, chord_triad_pcs
 
 
 def sanitize_track_overlaps(track: mido.MidiTrack) -> mido.MidiTrack:
@@ -89,15 +89,19 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
     times = [event[0] for event in events]
     tones = []
     bass_tones = []
+    triads = []
     for _, symbol in events:
         try:
             c_tones = {note % 12 for note in chord_notes(symbol)}
             b_tone = chord_root_and_bass(symbol)[1]
+            _, tr_tones = chord_triad_pcs(symbol)
         except Exception:
             c_tones = scale
             b_tone = min(scale)
+            tr_tones = scale
         tones.append(c_tones)
         bass_tones.append(b_tone)
+        triads.append(tr_tones)
 
     report = {
         "scale": sorted(scale),
@@ -116,8 +120,9 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
         track_name = next((msg.name for msg in track if msg.type == "track_name"), "").casefold()
         is_drum_track = "drum" in track_name or "bater" in track_name or "chimbal" in track_name or "hihat" in track_name
         is_vocal = any(k in track_name for k in ("vocal", "voz", "choir", "flute"))
-        is_harmonic = any(k in track_name for k in ("piano", "guitar", "viol", "teclado", "other", "outro", "steel", "organ", "orgao", "synth", "accordion", "sanfona"))
-        is_bass = ("bass" in track_name or "baixo" in track_name) or (not is_harmonic and not is_vocal and any(hasattr(msg, "channel") and msg.channel == 0 for msg in track))
+        is_solo = any(k in track_name for k in ("solo", "lead", "melod"))
+        is_accompaniment = any(k in track_name for k in ("guitar", "viol", "acompanhamento", "base", "steel")) and not is_solo
+        is_bass = ("bass" in track_name or "baixo" in track_name) or (not is_accompaniment and not is_vocal and any(hasattr(msg, "channel") and msg.channel == 0 for msg in track))
 
         opened = defaultdict(deque)
         tick = 0
@@ -138,6 +143,7 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
                 index = bisect_right(times, seconds) - 1 if times else -1
 
                 active_chord = tones[index] if (0 <= index < len(tones)) else set()
+                active_triad = triads[index] if (0 <= index < len(triads)) else set()
                 bass_target_pc = bass_tones[index] if (0 <= index < len(bass_tones)) else None
 
                 pc = original % 12
@@ -146,14 +152,14 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
                     # BAIXO: prioriza a nota fundamental da cifra e notas da escala na tessitura grave
                     if bass_target_pc is not None and pc == bass_target_pc:
                         target = bass_target_pc
-                    elif active_chord and pc in active_chord:
+                    elif active_triad and pc in active_triad:
                         target = pc
                     elif pc in scale:
                         target = pc
                     elif bass_target_pc is not None:
                         target = bass_target_pc
-                    elif active_chord:
-                        target = min(active_chord, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
+                    elif active_triad:
+                        target = min(active_triad, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
                     else:
                         target = min(scale, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
 
@@ -162,27 +168,34 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
                         bass_opts = [target + 12 * 3]
                     pitch = min(bass_opts, key=lambda n: abs(n - original))
 
+                elif is_accompaniment and active_triad:
+                    # INSTRUMENTOS DE ACOMPANHAMENTO HARMONICO (guitarra/violao base):
+                    # Alinham notas a triade fundamental do acorde ativo para evitar acordes suspensos (Csus2, Fsus2, Gsus4)
+                    if pc in active_triad:
+                        pitch = original
+                    else:
+                        closest_pc = min(active_triad, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
+                        octave = (original // 12) * 12
+                        candidates = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
+                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda c: abs(c - original))
+
                 else:
-                    # PRESERVAÇÃO TOTAL DE SOLOS, MELODIAS E PASSAGENS DIATÔNICAS:
-                    # 1. Se a nota pertence à escala da música, é 100% preservada (solos de guitarra, sanfona, teclado, voz)
+                    # PRESERVACAO TOTAL DE SOLOS, MELODIAS E PASSAGENS DIATONICAS:
+                    # Solos de guitarra, sanfona, piano solo, melodia vocal e faixas instrumentais tem 100% de liberdade melodica diatonica.
                     if pc in scale:
                         pitch = original
-                    # 2. Se a nota pertence ao acorde ativo (mesmo com acidentes fora da escala), é 100% preservada
                     elif active_chord and pc in active_chord:
                         pitch = original
-                    # 3. Somente notas fora da escala e fora do acorde ativo são corrigidas para a harmonia
                     elif active_chord:
                         closest_chord_pc = min(active_chord, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
                         octave = (original // 12) * 12
                         candidates = [closest_chord_pc + octave - 12, closest_chord_pc + octave, closest_chord_pc + octave + 12]
-                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda n: abs(n - original))
-                    # 4. Sem acorde ativo: corrige para a escala
+                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda c: abs(c - original))
                     else:
                         closest_scale_pc = min(scale, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
                         octave = (original // 12) * 12
                         candidates = [closest_scale_pc + octave - 12, closest_scale_pc + octave, closest_scale_pc + octave + 12]
-                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda n: abs(n - original))
-
+                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda c: abs(c - original))
                 if pitch != original:
                     report["corrected"] += 1
 

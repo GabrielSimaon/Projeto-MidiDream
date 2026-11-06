@@ -18,14 +18,14 @@ import numpy as np
 import pretty_midi
 
 from midi_timing import make_instrumental
-from music_guide import chord_notes, chord_root_and_bass
+from music_guide import chord_notes, chord_root_and_bass, chord_triad_pcs
 from accompaniment_cleanup import key_scale
 
 
 def _get_chord_intervals(
     chords: Sequence[tuple[float, str]], duration: float, default_key: str | None = None
 ) -> list[dict]:
-    """Constrói os intervalos temporais de cada acorde com suas notas constitutivas e escala."""
+    """Constrói os intervalos temporais de cada acorde com suas notas constitutivas, tríade fundamental e escala."""
     scale = key_scale(default_key) if default_key else {0, 2, 4, 5, 7, 9, 11}
     if not chords:
         return [
@@ -34,6 +34,7 @@ def _get_chord_intervals(
                 "end": max(duration, 60.0),
                 "symbol": default_key or "C",
                 "notes": scale,
+                "triad": {min(scale), (min(scale) + 4) % 12, (min(scale) + 7) % 12},
                 "scale": scale,
                 "root": min(scale),
                 "bass": min(scale),
@@ -47,15 +48,18 @@ def _get_chord_intervals(
         try:
             c_notes = {n % 12 for n in chord_notes(symbol)}
             root_pc, bass_pc = chord_root_and_bass(symbol)
+            _, triad_pcs = chord_triad_pcs(symbol)
         except Exception:
             c_notes = {0, 4, 7}
             root_pc, bass_pc = 0, 0
+            triad_pcs = {0, 4, 7}
         intervals.append(
             {
                 "start": float(t_start),
                 "end": float(nxt_start),
                 "symbol": symbol,
                 "notes": c_notes,
+                "triad": triad_pcs,
                 "scale": scale,
                 "root": root_pc,
                 "bass": bass_pc,
@@ -67,7 +71,14 @@ def _get_chord_intervals(
 def _find_active_interval(intervals: list[dict], time_sec: float) -> dict:
     """Localiza o acorde ativo para o instante de tempo."""
     if not intervals:
-        return {"notes": {0, 4, 7}, "scale": {0, 2, 4, 5, 7, 9, 11}, "root": 0, "bass": 0, "symbol": "C"}
+        return {
+            "notes": {0, 4, 7},
+            "triad": {0, 4, 7},
+            "scale": {0, 2, 4, 5, 7, 9, 11},
+            "root": 0,
+            "bass": 0,
+            "symbol": "C",
+        }
     for iv in reversed(intervals):
         if iv["start"] <= time_sec + 0.03:
             return iv
@@ -75,21 +86,31 @@ def _find_active_interval(intervals: list[dict], time_sec: float) -> dict:
 
 
 def _chord_voicing(chord_pcs: set[int], low_midi: int = 60, high_midi: int = 76) -> list[int]:
-    """Gera um voicing consonante fechado na tessitura desejada."""
-    voicing = []
-    for pc in sorted(chord_pcs):
-        for oct_shift in (3, 4, 5, 6):
-            pitch = pc + 12 * oct_shift
-            if low_midi <= pitch <= high_midi:
-                voicing.append(pitch)
-    voicing = sorted(set(voicing))
-    if len(voicing) > 3:
-        # Mantém até 3 notas para maior clareza rítmica
-        voicing = [voicing[0], voicing[1], voicing[-1]]
-    if not voicing:
-        root = min(chord_pcs) if chord_pcs else 0
-        voicing = [root + 60, (root + 4) % 12 + 60, (root + 7) % 12 + 60]
-    return voicing
+    """Gera um voicing consonante fechado na tessitura desejada contendo todas as notas fundamentais da tríade."""
+    import itertools
+
+    pcs = sorted(chord_pcs)
+    if not pcs:
+        pcs = [0, 4, 7]
+    target_center = (low_midi + high_midi) / 2.0
+    cands_per_pc = []
+    for pc in pcs:
+        cands = [pc + 12 * oct for oct in range(2, 8) if low_midi <= pc + 12 * oct <= high_midi]
+        if not cands:
+            cands = [min([pc + 12 * oct for oct in range(2, 8)], key=lambda x: abs(x - target_center))]
+        cands_per_pc.append(cands)
+
+    best_voicing = None
+    best_score = 1e9
+    for combo in itertools.product(*cands_per_pc):
+        span = max(combo) - min(combo)
+        center = sum(combo) / len(combo)
+        score = span * 2.5 + abs(center - target_center)
+        if score < best_score:
+            best_score = score
+            best_voicing = sorted(combo)
+
+    return best_voicing or [60, 64, 67]
 
 
 def enhance_piano_marking(
@@ -109,19 +130,20 @@ def enhance_piano_marking(
     notes = [n for n in inst.notes if n.end > n.start] if inst else []
 
     if len(notes) >= 6:
-        # Temos notas detectadas no áudio: quantizar o ataque e preservar notas diatônicas/solos
+        # Temos notas detectadas no áudio: quantizar o ataque e alinhar à tríade fundamental do acorde
         for n in notes:
             iv = _find_active_interval(intervals, n.start)
-            allowed = iv["notes"]
-            scale = iv.get("scale", {0, 2, 4, 5, 7, 9, 11})
+            triad = iv.get("triad", iv["notes"])
             pc = n.pitch % 12
 
-            # PRESERVAÇÃO TOTAL DE SOLOS E MELODIAS:
-            # Se a nota pertence à escala da música ou ao acorde ativo, mantém a altura original 100%!
-            if pc in allowed or pc in scale:
+            # ALINHAMENTO HARMÔNICO DA BASE DE PIANO (MARCAÇÃO):
+            # O Piano 1 fornece a pulsação e a harmonia fundamental da música.
+            # Suas notas devem coincidir com a tríade fundamental do acorde (Root, 3ª, 5ª)
+            # para não induzir detecção de acordes suspensos (ex: Csus2, Csus4) no Acordes.exe.
+            if pc in triad:
                 pitch = n.pitch
             else:
-                closest_pc = min(allowed, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
+                closest_pc = min(triad, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
                 octave = (n.pitch // 12) * 12
                 cands = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
                 pitch = min([c for c in cands if 0 <= c <= 127], key=lambda c: abs(c - n.pitch))
@@ -165,7 +187,7 @@ def enhance_piano_marking(
         t = 0.0
         while t < max_dur:
             iv = _find_active_interval(intervals, t)
-            voicing = _chord_voicing(iv["notes"], low_midi=60, high_midi=76)
+            voicing = _chord_voicing(iv.get("triad", iv["notes"]), low_midi=60, high_midi=76)
             beat_index = int(round(t / step))
             is_strong = (beat_index % 2 == 0)
             vel = 88 if is_strong else 76
@@ -201,19 +223,19 @@ def enhance_other_pad(
     notes = [n for n in inst.notes if n.end > n.start] if inst else []
 
     if len(notes) >= 6:
-        # Ajusta notas existentes para sustentação consonante, preservando notas diatônicas
+        # Ajusta notas existentes para sustentação consonante afinada com a tríade fundamental
         sorted_notes = sorted(notes, key=lambda n: n.start)
         for i, n in enumerate(sorted_notes):
             iv = _find_active_interval(intervals, n.start)
-            allowed = iv["notes"]
-            scale = iv.get("scale", {0, 2, 4, 5, 7, 9, 11})
+            triad = iv.get("triad", iv["notes"])
             pc = n.pitch % 12
 
-            # PRESERVAÇÃO TOTAL DE ARRANJOS E MELODIAS:
-            if pc in allowed or pc in scale:
+            # CAMA HARMÔNICA DA FAIXA 'OTHER' (PAD / SUSTENTAÇÃO):
+            # A faixa 'other' fornece a sustentação harmônica e deve enfatizar a tríade fundamental.
+            if pc in triad:
                 pitch = n.pitch
             else:
-                closest_pc = min(allowed, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
+                closest_pc = min(triad, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
                 octave = (n.pitch // 12) * 12
                 cands = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
                 pitch = min([c for c in cands if 0 <= c <= 127], key=lambda c: abs(c - n.pitch))
@@ -241,7 +263,7 @@ def enhance_other_pad(
     else:
         # Cama harmônica contínua dos acordes da cifra
         for iv in intervals:
-            voicing = _chord_voicing(iv["notes"], low_midi=48, high_midi=68)
+            voicing = _chord_voicing(iv.get("triad", iv["notes"]), low_midi=48, high_midi=68)
             t_start = iv["start"]
             t_end = iv["end"]
             if t_end - t_start < 0.2:

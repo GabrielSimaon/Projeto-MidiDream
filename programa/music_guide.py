@@ -117,6 +117,59 @@ def chord_root_and_bass(symbol):
     return root_val, bass_val
 
 
+def chord_triad_pcs(symbol: str) -> tuple[int, set[int]]:
+    """Retorna a fundamental e o conjunto das 3 notas da tríade fundamental do acorde.
+    
+    Mesmo para acordes estendidos como F9, Am7, Em7, C9 ou F7M, a harmonia base
+    necessita obrigatoriamente da tríade fundamental completa {Fundamental, Terça, Quinta}
+    para que detectores e players (como Acordes.exe/vanBasco) não confundam o acorde
+    com suspensões acidentais (Csus2, Csus4, etc.).
+    """
+    sym = re.sub(r"\s+", "", symbol).replace("♯", "#").replace("♭", "b")
+    inversion = re.search(r"/([A-G])([#b]?)$", sym)
+    if inversion:
+        sym = sym[: inversion.start()]
+    match = ROOT_PATTERN.match(sym)
+    if not match:
+        return 0, {0, 4, 7}
+    r_str, acc, body = match.groups()
+    root = (ROOTS[r_str] + {"#": 1, "b": -1, "": 0}[acc]) % 12
+
+    body_lower = body.lower()
+    is_sus4 = "sus4" in body_lower or (body.startswith("4") and not body.startswith("4#"))
+    is_sus2 = "sus2" in body_lower
+    is_dim = "dim" in body_lower or "°" in body or "º" in body
+    is_aug = "aug" in body_lower or "+" in body
+
+    is_minor = False
+    if not is_sus4 and not is_sus2:
+        if is_dim:
+            is_minor = True
+        elif "m" in body:
+            clean = body.replace("maj", "").replace("Maj", "").replace("7M", "").replace("M7", "").replace("dim", "")
+            if "m" in clean.lower():
+                is_minor = True
+
+    if is_sus4:
+        third = 5
+    elif is_sus2:
+        third = 2
+    elif is_minor:
+        third = 3
+    else:
+        third = 4
+
+    if is_dim:
+        fifth = 6
+    elif is_aug:
+        fifth = 8
+    else:
+        fifth = 7
+
+    triad = {(root + 0) % 12, (root + third) % 12, (root + fifth) % 12}
+    return root, triad
+
+
 STANDARD_KEYS = (
     # Tonalidades Maiores
     ("C maior", 0, (0, 2, 4, 5, 7, 9, 11)),
