@@ -72,6 +72,11 @@ def separate_instruments(stems_dir, output_dir, model_root, run, progress=None, 
     for kind in data["exported"]:
         if kind not in {*TARGETS, "guitar", "other"} or not (output / (kind + ".wav")).is_file():
             raise RuntimeError("O motor retornou uma faixa inválida.")
+    try:
+        from bleed_cleaner import normalize_audio_stems
+        normalize_audio_stems(output)
+    except Exception as exc:
+        print(f"[aviso] Normalização em separate_instruments: {exc}")
     if not data.get("errors"):
         save_cache(cache_root, key, [file for file in output.iterdir() if file.is_file()] +
                    [output.parent / "acompanhamento_nao_identificado.wav"])

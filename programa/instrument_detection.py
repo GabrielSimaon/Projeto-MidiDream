@@ -58,9 +58,8 @@ def decide_presence(windows, threshold=0.25):
             raise ValueError("O detector retornou confiança inválida.")
         hits = sum(score >= th for score in scores)
         peak = max(scores, default=0.0)
-        # Violões e guitarras no fundo podem aparecer em trechos esparsos; admite presença com 1 janela se peak for bom, ou 2 janelas
-        present = hits >= (1 if len(scores) <= 3 else 2) if scores else False
-        present = present or peak >= max(0.55, th)
+        # Detecta o instrumento se houver ao menos 1 janela acima do limiar
+        present = (hits >= 1)
         report[kind] = {"label": target["label"], "score": peak, "windows": hits, "present": present}
     return report
 

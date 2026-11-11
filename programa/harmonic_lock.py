@@ -1,11 +1,11 @@
-"""Alinhamento harmônico estrito com a cifra e escala da música.
+"""Alinhamento harmÃ´nico estrito com a cifra e escala da mÃºsica.
 
 Garante que:
-1. O acorde ativo da cifra é soberano: notas constitutivas do acorde (mesmo com acidentes)
-   são 100% preservadas e têm prioridade máxima.
+1. O acorde ativo da cifra Ã© soberano: notas constitutivas do acorde (mesmo com acidentes)
+   sÃ£o 100% preservadas e tÃªm prioridade mÃ¡xima.
 2. O baixo segue a nota de baixo/fundamental da cifra ativa na tessitura grave (MIDI 24 a 58).
-3. Notas dissonantes/fora de tom em piano, violão e guitarra são corrigidas para as notas do acorde ativo.
-4. A bateria (canal 10 / index 9) é 100% inalterada.
+3. Notas dissonantes/fora de tom em piano, violÃ£o e guitarra sÃ£o corrigidas para as notas do acorde ativo.
+4. A bateria (canal 10 / index 9) Ã© 100% inalterada.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from music_guide import chord_notes, chord_root_and_bass, chord_triad_pcs
 
 
 def sanitize_track_overlaps(track: mido.MidiTrack) -> mido.MidiTrack:
-    """Garante que notas da mesma altura no mesmo canal não sofram corte prematuro de NoteOff."""
+    """Garante que notas da mesma altura no mesmo canal nÃ£o sofram corte prematuro de NoteOff."""
     timeline = []
     tick = 0
     for msg in track:
@@ -79,7 +79,7 @@ def sanitize_track_overlaps(track: mido.MidiTrack) -> mido.MidiTrack:
 
 
 def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
-    """Alinha os instrumentos às notas da cifra e escala da música."""
+    """Alinha os instrumentos Ã s notas da cifra e escala da mÃºsica."""
     scale = key_scale(key)
     if not scale:
         raise ValueError("Escolha a escala para corrigir todos os instrumentos.")
@@ -149,24 +149,17 @@ def lock_midi(midi: mido.MidiFile, key: str, chords: tuple | list = ()) -> dict:
                 pc = original % 12
 
                 if is_bass:
-                    # BAIXO: prioriza a nota fundamental da cifra e notas da escala na tessitura grave
-                    if bass_target_pc is not None and pc == bass_target_pc:
-                        target = bass_target_pc
-                    elif active_triad and pc in active_triad:
-                        target = pc
-                    elif pc in scale:
-                        target = pc
-                    elif bass_target_pc is not None:
-                        target = bass_target_pc
-                    elif active_triad:
-                        target = min(active_triad, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
+                    if bass_target_pc is not None and pc not in scale and (not active_chord or pc not in active_chord):
+                        octave = (original // 12) * 12
+                        candidates = [bass_target_pc + octave - 12, bass_target_pc + octave, bass_target_pc + octave + 12]
+                        pitch = min([c for c in candidates if 24 <= c <= 60], key=lambda c: abs(c - original))
+                    elif pc not in scale and not (active_chord and pc in active_chord):
+                        closest_scale_pc = min(scale, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
+                        octave = (original // 12) * 12
+                        candidates = [closest_scale_pc + octave - 12, closest_scale_pc + octave, closest_scale_pc + octave + 12]
+                        pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda c: abs(c - original))
                     else:
-                        target = min(scale, key=lambda n: min(abs(n - pc), 12 - abs(n - pc)))
-
-                    bass_opts = [target + 12 * oct for oct in (2, 3, 4) if 24 <= target + 12 * oct <= 58]
-                    if not bass_opts:
-                        bass_opts = [target + 12 * 3]
-                    pitch = min(bass_opts, key=lambda n: abs(n - original))
+                        pitch = original
 
                 elif is_accompaniment and active_triad:
                     # INSTRUMENTOS DE ACOMPANHAMENTO HARMONICO (guitarra/violao base):
@@ -228,7 +221,7 @@ def lock_result(midi_dir: str | Path, result_dir: str | Path, key: str, chords: 
         "key": key,
         "drums_unchanged": True,
         "files": reports,
-        "notice": "Notas alinhadas com as cifras ativas e escala. Cifras com acidentes têm prioridade e notas dissonantes foram corrigidas.",
+        "notice": "Notas alinhadas com as cifras ativas e escala. Cifras com acidentes tÃªm prioridade e notas dissonantes foram corrigidas.",
     }
     Path(result_dir, "relatorio_harmonia.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

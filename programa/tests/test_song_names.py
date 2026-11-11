@@ -34,7 +34,7 @@ class NamesTests(unittest.TestCase):
                 self.assertEqual(song_title(path), "Minha música")
                 self.assertTrue(Path(reopened["combined_mid"]).exists())
                 self.assertEqual(
-                    json.loads((path / "resultado_salvo.json").read_text())["song_title"],
+                    json.loads((path / "resultado_salvo.json").read_text(encoding="utf-8"))["song_title"],
                     "Minha música",
                 )
             self.assertEqual(len(list_saved_jobs(root)), 2)

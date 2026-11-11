@@ -30,9 +30,16 @@ STEM_CHANNELS = {
     "vocals": 1,
     "piano": 2,
     "guitar": 3,
-    "other": 4,
+    "acoustic_guitar": 3,
+    "pad": 4,
+    "accordion": 5,
+    "electric_guitar": 6,
+    "other": 7,
     "piano_solo": 8,
     "drums": 9,
+    "strings": 10,
+    "clarinet": 11,
+    "sax": 12,
 }
 
 
@@ -66,14 +73,23 @@ def calculate_relative_volumes(
     que a base de fundo nunca dispute espaço com o piano ou solo principal.
     """
     path = Path(stems_dir)
+    default_vols = {
+        "piano": 102,
+        "piano_solo": 115,
+        "other": 85 if other_volume_override is None else other_volume_override,
+        "guitar": 98,
+        "electric_guitar": 95,
+        "accordion": 100,
+        "pad": 82,
+        "bass": 112,
+        "drums": 110,
+        "vocals": 100,
+    }
     if not path.is_dir():
-        default_other = 65 if lower_second_piano else 75
-        if other_volume_override is not None:
-            default_other = other_volume_override
-        return {"piano": 105, "piano_solo": 115, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
+        return default_vols
 
     rms_levels = {}
-    for name in ("piano", "other", "guitar", "bass", "drums", "vocals"):
+    for name in ("piano", "other", "guitar", "bass", "drums", "vocals", "accordion", "electric_guitar"):
         for ext in (".wav", ".flac", ".mp3"):
             stem_file = path / f"{name}{ext}"
             if stem_file.is_file():
@@ -82,10 +98,7 @@ def calculate_relative_volumes(
 
     # Se não temos áudio para medir, usa valores balanceados padrão
     if not rms_levels:
-        default_other = 65 if lower_second_piano else 75
-        if other_volume_override is not None:
-            default_other = other_volume_override
-        return {"piano": 105, "piano_solo": 115, "other": default_other, "guitar": 90, "bass": 110, "drums": 108, "vocals": 100}
+        return default_vols
 
     # Referência melódica/harmônica principal: piano ou guitarra
     ref_lead = max(rms_levels.get("piano", 0.0), rms_levels.get("guitar", 0.0), 0.01)
@@ -137,24 +150,38 @@ def _mix_tracks(midi: mido.MidiFile, volumes: dict[str, int]) -> bool:
         if not channels:
             continue
         ch = channels[0]
+        track_name = next(
+            (
+                str(m.name).casefold()
+                for m in track
+                if m.type == "track_name"
+            ),
+            "",
+        )
 
         target_vol = None
         if ch == 0:
             target_vol = volumes.get("bass", 112)
         elif ch == 9:
             target_vol = volumes.get("drums", 110)
-        elif ch in (2, 5):
-            target_vol = volumes.get("piano", 105)
         elif ch == 8:
             target_vol = volumes.get("piano_solo", 115)
-        elif ch == 3:
-            target_vol = volumes.get("guitar", 90)
-        elif ch in (4, 6, 7):
-            target_vol = volumes.get("other", 65)
+        elif ch == 2:
+            target_vol = volumes.get("piano", 102)
+        elif ch == 5 or any(word in track_name for word in ("accordion", "sanfona", "acordeon")):
+            target_vol = volumes.get("accordion", 100)
+        elif ch == 3 or any(word in track_name for word in ("acoustic", "violao", "violão")):
+            target_vol = volumes.get("guitar", 98)
+        elif ch == 6 or "electric" in track_name or "guitarra" in track_name:
+            target_vol = volumes.get("electric_guitar", 95)
+        elif ch in (4, 10) or any(word in track_name for word in ("pad", "string", "cordas", "cama")):
+            target_vol = volumes.get("pad", 82)
+        elif ch == 7 or "other" in track_name or "acompanhamento" in track_name:
+            target_vol = volumes.get("other", 88)
         elif ch == 1:
             target_vol = volumes.get("vocals", 100)
         else:
-            target_vol = 100
+            target_vol = volumes.get("other", 90)
 
         if target_vol is not None:
             has_cc7 = False
@@ -168,11 +195,11 @@ def _mix_tracks(midi: mido.MidiFile, volumes: dict[str, int]) -> bool:
                 track.insert(0, mido.Message("control_change", channel=ch, control=7, value=target_vol, time=0))
                 modified = True
 
-            if target_vol < 90:
-                scale = target_vol / 100.0
-                for m in track:
-                    if m.type == "note_on" and m.velocity > 0:
-                        m.velocity = int(np.clip(m.velocity * scale, 30, 127))
+            # Garante que as velocities permaneçam vivas e expressivas (mínimo 60, preservando dinâmica do SoundFont)
+            for m in track:
+                if m.type == "note_on" and m.velocity > 0:
+                    if m.velocity < 55:
+                        m.velocity = int(np.clip(m.velocity * 1.25, 58, 85))
                         modified = True
     return modified
 

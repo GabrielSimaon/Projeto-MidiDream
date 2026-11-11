@@ -92,7 +92,7 @@ def apply_style(midi, stem, bpm, grid_times, grid=16, profile=None):
     """Reúne fragmentos de mesma altura e aplica somente parâmetros agregados."""
     profile = profile or DEFAULT_STYLE
     result = copy.deepcopy(midi)
-    gap = float(profile.get("merge_gap", 0.015))
+    gap = float(profile.get("merge_gap", 0.08))
     stats = profile.get("stats", {}).get(stem, {})
     if stem == "vocals":
         for inst in result.instruments:
@@ -108,11 +108,14 @@ def apply_style(midi, stem, bpm, grid_times, grid=16, profile=None):
         # As alturas são corrigidas depois, com cifras e contexto temporal.
         # Evita uma correção global cega antes de decidir quais notas são fracas.
         merged = []
+        step_16th = 60.0 / float(bpm) / 4.0 if bpm else 0.125
         for n in sorted(inst.notes, key=lambda n: (n.pitch, n.start)):
+            is_new_beat = merged and (n.start - merged[-1].start) >= step_16th * 0.85
             if (
                 merged
                 and n.pitch == merged[-1].pitch
                 and n.start - merged[-1].end <= gap
+                and not is_new_beat
                 and not (n.start > merged[-1].end and n.velocity > merged[-1].velocity * 1.15)
             ):
                 merged[-1].end = max(merged[-1].end, n.end)
@@ -145,7 +148,7 @@ def apply_style(midi, stem, bpm, grid_times, grid=16, profile=None):
 
 # Apenas timbres e dinâmica agregada; sem BPM, escala ou notas de uma música fixa.
 DEFAULT_STYLE = {
-    "merge_gap": 0.015,
+    "merge_gap": 0.08,
     "stats": {
         "bass": {"program": 33, "velocity": [30, 37, 118]},
         "guitar": {"program": 25, "velocity": [16, 18, 57]},

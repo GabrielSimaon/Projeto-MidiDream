@@ -42,7 +42,7 @@ def classify_body(audio, rate, onset):
     # A esteira da caixa é ruído branco espalhado na faixa média-alta
     noisy_band = spectrum[(frequencies >= 500) & (frequencies < 4500)]
     flatness = float(np.exp(np.mean(np.log(noisy_band + 1e-20))) / (np.mean(noisy_band) + 1e-20))
-    has_snare_noise = (noise > body * 0.22 and flatness > 0.25) or (noise > body * 0.45)
+    has_snare_noise = (noise > body * 0.015 and flatness > 0.20) or (noise > body * 0.45)
 
     # Identifica o pico de ressonância do tambor (58 Hz a 400 Hz)
     region = (frequencies >= 58) & (frequencies <= 400)
@@ -53,7 +53,7 @@ def classify_body(audio, rate, onset):
     peak_power = power(max(50, peak - 20), peak + 20)
     concentration = peak_power / (body + 1e-15)
 
-    # Rejeita se for esteira de caixa, se tiver subgrave de bumbo ou se a energia não tiver foco ressonante
+    # Rejeita se for esteira de caixa, se tiver subgrave de bumbo ou se a energia não tiver foco ressonante puro
     if has_snare_noise or concentration < 0.28 or sub_fraction > 0.32 or (peak < 78 and sub_fraction > 0.20):
         return None, sub_fraction, has_snare_noise
 

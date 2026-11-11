@@ -150,7 +150,11 @@ def transcribe_words(
                 "O reconhecimento da letra foi interrompido. O MIDI já foi salvo. "
                 + str(exc)[-500:]
             ) from None
-        return json.loads(output.read_text(encoding="utf-8"))
+        raw = output.read_bytes()
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            return json.loads(raw.decode("latin-1"))
 
 
 class YouTubeDownloadError(RuntimeError):
@@ -529,6 +533,7 @@ def run_pipeline(
     accompaniment_filter: str = "chords",
     harmonic_correction: bool = True,
     tonality: str | None = None,
+    solo_instrument: str = "piano",
 ) -> dict:
     """Executa processamento e retorna todos os caminhos relevantes."""
     # Etapa 1: valida antes de criar arquivos, baixar áudio ou carregar modelos.
@@ -538,7 +543,7 @@ def run_pipeline(
     if drum_grid not in (8, 16, 32):
         raise ValueError("A grade da bateria deve ser 8, 16 ou 32.")
     if require_guide:
-        bpm_override = validate_required_inputs(manual_lyrics, bpm_override)
+        bpm_override = validate_required_inputs(manual_lyrics, bpm_override, require_bpm=True)
     if mix_settings is None and speed == "express":
         mix_settings = {"other": 100}
     mix_settings = validate_mix(mix_settings)
@@ -743,14 +748,14 @@ def run_pipeline(
         bpm_override = float(detected_info["bpm"])
         _notify(progress, "tempo", f"BPM detectado automaticamente: {bpm_override:.2f}")
 
-    # Atenuação de vazamento acústico de fundo nos stems antes da conversão para MIDI
+    # Normalização e estabilização de volume nos stems antes da conversão para MIDI
     if stems_dir.is_dir():
-        _notify(progress, "filtro", "Removendo vazamentos e instrumentos de fundo nos stems…")
+        _notify(progress, "filtro", "Normalizando faixas e estabilizando áudio dos stems…")
         try:
-            from bleed_cleaner import clean_audio_bleed
-            clean_audio_bleed(stems_dir)
+            from bleed_cleaner import normalize_audio_stems
+            normalize_audio_stems(stems_dir)
         except Exception as exc:
-            print(f"[aviso] Limpeza de áudio nos stems: {exc}")
+            print(f"[aviso] Normalização de áudio nos stems: {exc}")
 
     _notify(progress, "midi", "Transcrevendo as faixas para MIDI…")
     cmd = [
@@ -843,33 +848,11 @@ def run_pipeline(
     for report_file in engine_midi_dir.glob("relatorio_*.json"):
         shutil.copy2(report_file, result_dir / report_file.name)
 
-    # Elimina notas de instrumentos que vazaram no fundo de outras faixas
-    try:
-        from bleed_cleaner import clean_midi_bleed
-        stems_midi_map = {}
-        for mid_f in engine_midi_dir.glob("*.mid"):
-            if mid_f.name not in ("completo.mid", "instrumental.mid", "hihat.mid"):
-                stems_midi_map[mid_f.stem] = pretty_midi.PrettyMIDI(str(mid_f))
-        if stems_midi_map:
-            removed_bleed = clean_midi_bleed(stems_midi_map)
-            total_b = sum(removed_bleed.values())
-            if total_b > 0:
-                _notify(progress, "filtro", f"{total_b} notas vazadas de fundo removidas das faixas")
-                for s_name, s_midi in stems_midi_map.items():
-                    s_midi.write(str(engine_midi_dir / f"{s_name}.mid"))
-                clean_combined = pretty_midi.PrettyMIDI(initial_tempo=float(bpm_override or 120), resolution=480)
-                for s_name in sorted(stems_midi_map):
-                    for inst in stems_midi_map[s_name].instruments:
-                        clean_combined.instruments.append(inst)
-                clean_combined.write(str(engine_midi_dir / "completo.mid"))
-    except Exception as exc:
-        print(f"[aviso] Limpeza de vazamento: {exc}")
-
     combined = engine_midi_dir / "completo.mid"
     if not combined.exists():
         raise RuntimeError("O motor não gerou completo.mid. Log:\n" + core_log[-10000:])
 
-    # Copia os MIDIs individuais e o combinado, mantendo também o log de processamento.
+    # Copia os MIDIs originais do motor_midi para resultados/midi, mantendo motor_midi intacto como base limpa
     for file in engine_midi_dir.glob("*.mid"):
         dst = midi_dir / file.name
         shutil.copy2(file, dst)
@@ -881,27 +864,6 @@ def run_pipeline(
                 if msg.type == "program_change" and msg.channel == 1:
                     msg.program = vocal_program
         midi.save(dst)
-
-    # Balanceamento automático de volumes dos instrumentos conforme RMS do áudio
-    try:
-        from auto_mix import calculate_relative_volumes, apply_auto_mix
-        stems_source = stems_dir if stems_dir.is_dir() else engine_midi_dir
-        lower_second = True
-        other_vol = None
-        if mix_settings:
-            if "lower_second_piano" in mix_settings:
-                lower_second = bool(mix_settings["lower_second_piano"])
-            if "other" in mix_settings:
-                other_vol = int(mix_settings["other"])
-        rel_vols = calculate_relative_volumes(
-            stems_source,
-            lower_second_piano=lower_second,
-            other_volume_override=other_vol if (other_vol is not None and other_vol != 100) else None,
-        )
-        apply_auto_mix(midi_dir, rel_vols)
-        _notify(progress, "mix", "Volumes dos instrumentos balanceados automaticamente conforme gravação original.")
-    except Exception as exc:
-        print(f"[aviso] Auto mix: {exc}")
 
     combined_out = midi_dir / "completo.mid"
     remap_channels(combined_out)
@@ -1091,50 +1053,6 @@ def run_pipeline(
         _notify(progress, "harmonia", f"Harmonia na escala ({effective_key}): {fixed} notas alinhadas; bateria preservada.")
         make_instrumental(combined_out, midi_dir / "instrumental.mid")
 
-    # Aprimoramento e marcação rítmica dos teclados (piano e other) no tempo do BPM
-    try:
-        from keyboard_enhancer import enhance_keyboards
-        kb_report = enhance_keyboards(
-            midi_dir=midi_dir,
-            bpm=float(bpm_override or 120.0),
-            chords=chords_timed or (),
-            duration=duration,
-            key=effective_key,
-        )
-        _notify(
-            progress,
-            "teclados",
-            f"Teclados no tempo e escala ({kb_report.get('piano_notes', 0)} notas piano, {kb_report.get('other_notes', 0)} notas pad/outros)",
-        )
-        make_instrumental(combined_out, midi_dir / "instrumental.mid")
-    except Exception as exc:
-        print(f"[aviso] Aprimoramento de teclados: {exc}")
-
-    if chord_accompaniment and chord_marks:
-        add_chord_track(combined_out, manual_lyrics, chord_marks, detected_words, duration)
-        make_instrumental(combined_out, midi_dir / "instrumental.mid")
-
-    # Garante sustentação de groove contínuo no contrabaixo
-    try:
-        from bass_pitch import sustain_bass_groove
-        bass_file = midi_dir / "bass.mid"
-        if bass_file.is_file():
-            b_midi = pretty_midi.PrettyMIDI(str(bass_file))
-            sustain_bass_groove(b_midi, bpm=float(bpm_override or 120.0))
-            b_midi.write(str(bass_file))
-    except Exception as exc:
-        print(f"[aviso] Sustentação do baixo: {exc}")
-
-    # Balanceamento automático de volumes dos instrumentos (ex: piano 2 mais baixo que piano 1)
-    try:
-        from auto_mix import calculate_relative_volumes, apply_auto_mix
-        volumes = calculate_relative_volumes(stems_dir if stems_dir.is_dir() else input_dir)
-        apply_auto_mix(midi_dir, volumes)
-        _notify(progress, "mix", f"Volumes ajustados automaticamente: piano1={volumes.get('piano')}, piano2={volumes.get('other')}, guitar={volumes.get('guitar')}")
-        make_instrumental(combined_out, midi_dir / "instrumental.mid")
-    except Exception as exc:
-        print(f"[aviso] Balanceamento de volumes: {exc}")
-
     # Sincronização inteligente para vídeos de karaokê e playbacks instrumentais
     try:
         from karaoke_sync import is_karaoke_source, align_karaoke_lyrics_rhythmically, extract_intro_from_info, parse_vtt_subtitles
@@ -1153,8 +1071,8 @@ def run_pipeline(
                 detected_words = vtt_words
                 _notify(progress, "letra", "Letra sincronizada diretamente pelas legendas do YouTube!")
 
-        # 2. Se for karaokê/playback e a letra foi fornecida manualmente
-        if (is_karaoke or len(detected_words) < 8) and manual_lyrics.strip():
+        # 2. Se for karaokê/playback e a letra foi fornecida manualmente (sem alinhamento acústico prévio)
+        if (is_karaoke or not detected_words) and not align_lyrics and manual_lyrics.strip():
             info_json = input_dir / "musica.info.json"
             intro_sec = extract_intro_from_info(info_json)
             karaoke_aligned = align_karaoke_lyrics_rhythmically(
@@ -1174,9 +1092,10 @@ def run_pipeline(
     if detected_words:
         detected_words = [w for w in detected_words if not is_chord_symbol(w.get("text", ""))]
 
-    # Detecção e separação de solos para a faixa dedicada "Piano Solo" (função exclusiva de solo no começo, meio e final)
+    # Detecção e separação de solos para instrumento de solo dedicado (Piano Solo, Guitarra Elétrica ou Violão)
+    actual_solo = solo_instrument or (mix_settings.get("solo_instrument") if mix_settings else "piano") or "piano"
+    solo_intervals = []
     try:
-        import pretty_midi
         from solo_detector import detect_solo_intervals, split_piano_solo
         solo_intervals = detect_solo_intervals(
             duration=duration,
@@ -1186,38 +1105,62 @@ def run_pipeline(
         solo_report = split_piano_solo(
             piano_midi_path=midi_dir / "piano.mid",
             other_midi_path=midi_dir / "other.mid",
+            drums_midi_path=midi_dir / "drums.mid",
             solo_intervals=solo_intervals,
             output_solo_path=midi_dir / "piano_solo.mid",
             output_piano_path=midi_dir / "piano.mid",
             bpm=float(bpm_override or 120.0),
+            key=effective_key,
+            chords=chords_timed or (),
+            solo_instrument=actual_solo,
         )
         if solo_report.get("solo_notes", 0) > 0:
             _notify(
                 progress,
                 "solo",
-                f"PianoSolo ativado: {solo_report['solo_notes']} notas de solo isoladas "
+                f"Solo melódico isolado ({actual_solo}): {solo_report['solo_notes']} notas de solo "
                 f"(Começo: {solo_report['comeco_notes']}, Meio: {solo_report['meio_notes']}, Final: {solo_report['final_notes']}). "
-                f"Base de piano limpa sem notas de solo misturadas.",
+                f"Base e outros limpos sem duplicar solo.",
             )
-            # Recombina completo.mid incluindo a faixa dedicada Piano Solo
-            remap_channels(midi_dir / "piano_solo.mid")
-            remap_channels(midi_dir / "piano.mid")
-            comb = pretty_midi.PrettyMIDI(str(combined_out))
-            comb.instruments = [
-                i for i in comb.instruments
-                if i.name not in ("Piano", "Piano Solo", "PianoSolo")
-            ]
-            p_base_pm = pretty_midi.PrettyMIDI(str(midi_dir / "piano.mid"))
-            if p_base_pm.instruments:
-                comb.instruments.append(p_base_pm.instruments[0])
-            p_solo_pm = pretty_midi.PrettyMIDI(str(midi_dir / "piano_solo.mid"))
-            if p_solo_pm.instruments:
-                comb.instruments.append(p_solo_pm.instruments[0])
-            comb.write(str(combined_out))
-            remap_channels(combined_out)
-            make_instrumental(combined_out, midi_dir / "instrumental.mid")
     except Exception as exc:
-        print(f"[aviso] Separação de Piano Solo: {exc}")
+        print(f"[aviso] Separação de Solo: {exc}")
+
+    # Aprimoramento e consolidação dos teclados e instrumentos de acompanhamento
+    try:
+        from keyboard_enhancer import enhance_keyboards
+        kb_report = enhance_keyboards(
+            midi_dir=midi_dir,
+            engine_midi_dir=engine_midi_dir,
+            bpm=float(bpm_override or 120.0),
+            chords=chords_timed or (),
+            duration=duration,
+            key=effective_key,
+            solo_intervals=solo_intervals,
+            allow_synthetic=False,
+            solo_instrument=actual_solo,
+        )
+        _notify(
+            progress,
+            "teclados",
+            f"Separação multi-instrumental concluída [Solo: {kb_report.get('solo_instrument', 'Piano Solo')}] ({kb_report.get('piano_notes', 0)} notas piano base, {kb_report.get('piano_solo_notes', 0)} notas solo, {kb_report.get('guitar_notes', 0)} notas violão, {kb_report.get('accordion_notes', 0)} notas sanfona, {kb_report.get('pad_notes', 0)} notas pad)",
+        )
+        make_instrumental(combined_out, midi_dir / "instrumental.mid")
+    except Exception as exc:
+        print(f"[aviso] Aprimoramento de teclados: {exc}")
+
+    # Balanceamento automático de volumes dos instrumentos
+    try:
+        from auto_mix import calculate_relative_volumes, apply_auto_mix
+        volumes = calculate_relative_volumes(stems_dir if stems_dir.is_dir() else input_dir)
+        apply_auto_mix(midi_dir, volumes)
+        _notify(progress, "mix", f"Volumes ajustados automaticamente: piano={volumes.get('piano')}, piano_solo={volumes.get('piano_solo')}, other={volumes.get('other')}")
+        make_instrumental(combined_out, midi_dir / "instrumental.mid")
+    except Exception as exc:
+        print(f"[aviso] Balanceamento de volumes: {exc}")
+
+    if chord_accompaniment and chord_marks:
+        add_chord_track(combined_out, manual_lyrics, chord_marks, detected_words, duration)
+        make_instrumental(combined_out, midi_dir / "instrumental.mid")
 
     # Etapa 5: converte palavras em eventos de sílabas e exporta MIDI/KAR.
     lyric_events, plain_lyrics, lyric_method = build_lyric_events(
@@ -1292,7 +1235,11 @@ def run_pipeline(
     )
 
     # Etapa 6: aplica volumes e monta o ZIP que será oferecido para download.
-    apply_mix(result_dir, mix_settings)
+    # O programa GM pertence à identidade detectada do stem; a mixagem só deve
+    # alterar volumes, nunca trocar guitarra, sanfona ou outro instrumento por piano.
+    final_mix_settings = dict(mix_settings or {})
+    final_mix_settings["preserve_programs"] = True
+    apply_mix(result_dir, final_mix_settings)
 
     # Garante alinhamento métrico exato (100% cravado no BPM e sem desvios de ticks)
     try:

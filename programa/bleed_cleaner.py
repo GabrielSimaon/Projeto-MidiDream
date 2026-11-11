@@ -10,98 +10,49 @@ import soundfile as sf
 import librosa
 
 
-def clean_audio_bleed(stems_dir: str | Path) -> dict[str, bool]:
-    """Aplica soft gating dinâmico nos stems para atenuar vazamento de voz e bateria no fundo.
+def normalize_audio_stems(stems_dir: str | Path, target_peak_db: float = -1.0) -> dict[str, float]:
+    """Normaliza o volume de pico de cada faixa de áudio separada para um nível uniforme (-1.0 dBFS).
     
-    Identifica trechos onde um instrumento secundário (ex: piano, guitarra) está em repouso
-    ou muito baixo, mas registra resíduo de voz ou bateria que sangrou durante a separação.
+    Elimina oscilações indesejadas de ganho, remove DC offset e assegura que todas as faixas
+    em faixas_instrumentos tenham volume equilibrado, audível e consistente.
     """
     stems_path = Path(stems_dir)
     if not stems_path.is_dir():
         return {}
 
-    stem_names = ["vocals", "drums", "bass", "piano", "guitar", "other"]
-    audio_files: dict[str, Path] = {}
-    for name in stem_names:
-        for ext in (".wav", ".flac"):
-            p = stems_path / f"{name}{ext}"
-            if p.is_file():
-                audio_files[name] = p
-                break
+    target_peak = 10.0 ** (target_peak_db / 20.0)
+    results = {}
 
-    if "vocals" not in audio_files and "drums" not in audio_files:
-        return {}
-
-    # Carrega os envelopes dos stems principais para referência de vazamento
-    sr = 22050
-    hop = 512
-    main_envelopes = {}
-    for key in ("vocals", "drums", "bass"):
-        if key in audio_files:
-            try:
-                y, _ = librosa.load(str(audio_files[key]), sr=sr, mono=True)
-                rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=hop)[0]
-                peak = float(np.quantile(rms, 0.95)) if len(rms) else 0.0
-                main_envelopes[key] = (rms, peak, len(y))
-            except Exception:
-                pass
-
-    report = {}
-    # Aplica atenuação nos instrumentos de acompanhamento
-    for inst_name in ("piano", "guitar", "other"):
-        if inst_name not in audio_files:
+    for audio_file in sorted(stems_path.iterdir()):
+        if not audio_file.is_file() or audio_file.suffix.lower() not in (".wav", ".flac", ".mp3", ".ogg"):
             continue
-        inst_file = audio_files[inst_name]
         try:
-            y_inst, orig_sr = sf.read(str(inst_file), always_2d=True)
-            mono_inst = np.mean(y_inst, axis=1) if y_inst.shape[1] > 1 else y_inst[:, 0]
-            
-            # Reamostra temporariamente para calcular RMS compatível
-            mono_resampled = librosa.resample(mono_inst, orig_sr=orig_sr, target_sr=sr) if orig_sr != sr else mono_inst
-            rms_inst = librosa.feature.rms(y=mono_resampled, frame_length=1024, hop_length=hop)[0]
-            peak_inst = float(np.quantile(rms_inst, 0.95)) if len(rms_inst) else 0.0
-            if peak_inst <= 1e-6:
+            data, orig_sr = sf.read(str(audio_file), always_2d=True, dtype="float32")
+            if len(data) == 0:
                 continue
 
-            # Máscara de atenuação
-            attenuate_mask = np.zeros(len(rms_inst), dtype=bool)
+            # Remove DC offset em cada canal
+            data = data - np.mean(data, axis=0)
+            peak = float(np.max(np.abs(data)))
 
-            # Verifica vazamento de voz: trecho onde voz canta forte e o instrumento está residual
-            if "vocals" in main_envelopes:
-                rms_vox, peak_vox, _ = main_envelopes["vocals"]
-                n_frames = min(len(rms_inst), len(rms_vox))
-                if peak_vox > 1e-5:
-                    is_vox_strong = rms_vox[:n_frames] > peak_vox * 0.18
-                    is_inst_residual = rms_inst[:n_frames] < peak_inst * 0.10
-                    # Vazamento confirmado quando voz domina o canal do instrumento
-                    attenuate_mask[:n_frames] |= (is_vox_strong & is_inst_residual & (rms_inst[:n_frames] < rms_vox[:n_frames] * 0.35))
+            # Se a faixa tiver sinal perceptível (> -45 dB)
+            if peak >= 0.005:
+                gain = target_peak / peak
+                # Limite de ganho (+24 dB / ~15.8x) para não amplificar chiado de faixas vazias
+                gain = min(gain, 15.85)
+                norm_data = np.clip(data * gain, -1.0, 1.0)
+                sf.write(str(audio_file), norm_data, orig_sr, subtype="PCM_16" if audio_file.suffix.lower() == ".wav" else None)
+                results[audio_file.name] = gain
+        except Exception as exc:
+            print(f"[aviso] Falha ao normalizar faixa {audio_file.name}: {exc}")
 
-            if np.count_nonzero(attenuate_mask) > 0:
-                # Converte máscara de quadros para amostras no áudio original
-                ratio = float(orig_sr) / float(sr)
-                hop_orig = int(round(hop * ratio))
-                mask_samples = np.repeat(attenuate_mask, hop_orig)
-                if len(mask_samples) < len(y_inst):
-                    mask_samples = np.pad(mask_samples, (0, len(y_inst) - len(mask_samples)), constant_values=False)
-                else:
-                    mask_samples = mask_samples[:len(y_inst)]
+    return results
 
-                # Suaviza a curva de transição para evitar cliques
-                gain = np.ones(len(y_inst), dtype=np.float32)
-                gain[mask_samples] = 0.05
-                import scipy.ndimage
-                smooth_radius = int(orig_sr * 0.02)  # 20 ms
-                if smooth_radius > 1:
-                    gain = scipy.ndimage.gaussian_filter1d(gain, sigma=smooth_radius)
 
-                # Aplica o ganho em todos os canais
-                y_clean = y_inst * gain[:, np.newaxis]
-                sf.write(str(inst_file), y_clean, orig_sr, subtype="PCM_16")
-                report[inst_name] = True
-        except Exception:
-            report[inst_name] = False
-
-    return report
+def clean_audio_bleed(stems_dir: str | Path) -> dict[str, bool]:
+    """Normaliza e estabiliza o áudio das faixas separadas, eliminando oscilações de volume."""
+    norm_res = normalize_audio_stems(stems_dir)
+    return {k: True for k in norm_res}
 
 
 def clean_midi_bleed(midis: dict[str, pretty_midi.PrettyMIDI]) -> dict[str, int]:
@@ -121,6 +72,40 @@ def clean_midi_bleed(midis: dict[str, pretty_midi.PrettyMIDI]) -> dict[str, int]
     if "bass" in midis:
         bass_notes = [n for inst in midis["bass"].instruments if not inst.is_drum for n in inst.notes]
 
+    drum_attacks: list[float] = []
+    if "drums" in midis:
+        drum_attacks = [
+            round(n.start, 3)
+            for inst in midis["drums"].instruments
+            if inst.is_drum
+            for n in inst.notes
+        ]
+
+    # Limpeza de vazamento em introdução: remove vazamento de piano no baixo antes do groove
+    piano_notes_ref = []
+    if "piano" in midis:
+        piano_notes_ref = [n for inst in midis["piano"].instruments if not inst.is_drum for n in inst.notes]
+
+    if "bass" in midis and piano_notes_ref:
+        first_drum_groove = 999.0
+        if "drums" in midis:
+            groove_kicks = [n.start for inst in midis["drums"].instruments if inst.is_drum for n in inst.notes if n.pitch in (35, 36) and n.velocity >= 70]
+            if groove_kicks:
+                first_drum_groove = min(groove_kicks)
+
+        for b_inst in midis["bass"].instruments:
+            if b_inst.is_drum:
+                continue
+            clean_b = []
+            for bn in b_inst.notes:
+                if bn.start < first_drum_groove and bn.start < 16.0:
+                    coincides_with_piano = any(abs(bn.start - pn.start) < 0.08 or (pn.start <= bn.start <= pn.end) for pn in piano_notes_ref)
+                    if coincides_with_piano and bn.velocity < 115:
+                        removed_counts["bass"] += 1
+                        continue
+                clean_b.append(bn)
+            b_inst.notes = clean_b
+
     # 1. Remove vazamento vocal e de baixo no acompanhamento (piano, guitarra, other)
     for stem_name in ("piano", "guitar", "acoustic_guitar", "electric_guitar", "other"):
         if stem_name not in midis:
@@ -137,35 +122,35 @@ def clean_midi_bleed(midis: dict[str, pretty_midi.PrettyMIDI]) -> dict[str, int]
                 n_mid = (n.start + n.end) / 2.0
                 n_dur = n.end - n.start
 
-                # Regra A: Vazamento de Baixo (grave <= 55 que coincide com nota de baixo)
-                if n.pitch <= 55 and bass_notes:
+                # Regra A: Vazamento de Baixo (apenas ruído residual muito fraco no subgrave abaixo de C3)
+                if n.pitch < 48 and n.velocity < 42 and bass_notes:
                     for b in bass_notes:
-                        # Se coincide no tempo e altura (ou oitava)
                         if b.start <= n_mid <= b.end or n.start <= (b.start + b.end) / 2.0 <= n.end:
-                            if n.pitch % 12 == b.pitch % 12:
-                                # Se o baixo é a fonte real dessa nota grave
+                            if n.pitch % 12 == b.pitch % 12 and n.velocity < b.velocity * 0.45:
                                 is_bleed = True
                                 break
                     if is_bleed:
                         removed_counts[stem_name] += 1
                         continue
 
-                # Regra B: Vazamento Vocal
-                if vocal_notes:
+                # Regra B: Vazamento Vocal (apenas ruído residual fraco, nunca notas harmônicas normais)
+                if vocal_notes and n.velocity < 38:
                     for v in vocal_notes:
                         if v.start <= n_mid <= v.end or n.start <= (v.start + v.end) / 2.0 <= n.end:
-                            # Se colide no tempo com a voz
                             overlap_start = max(n.start, v.start)
                             overlap_end = min(n.end, v.end)
                             overlap = max(0.0, overlap_end - overlap_start)
-                            if overlap >= min(n_dur, v.end - v.start) * 0.50:
-                                # Mesma nota ou mesma oitava da melodia vocal
-                                if n.pitch % 12 == v.pitch % 12:
-                                    # Se a velocidade no acompanhamento não for muito mais forte que a voz
-                                    if n.velocity <= v.velocity * 1.05:
-                                        is_bleed = True
-                                        break
+                            if overlap >= min(n_dur, v.end - v.start) * 0.60:
+                                if n.pitch % 12 == v.pitch % 12 and n.velocity < v.velocity * 0.40:
+                                    is_bleed = True
+                                    break
                     if is_bleed:
+                        removed_counts[stem_name] += 1
+                        continue
+
+                # Regra C: Vazamento de Bateria (transiente curto < 0.11s coincidindo com ataque de bateria)
+                if drum_attacks and n_dur < 0.11 and stem_name in ("piano", "guitar", "other"):
+                    if any(abs(n.start - dt) <= 0.025 for dt in drum_attacks):
                         removed_counts[stem_name] += 1
                         continue
 

@@ -45,7 +45,7 @@ class InstrumentTests(unittest.TestCase):
             midi.save(path)
             remap_channels(path)
             result = mix_midi(mido.MidiFile(path), {"piano_program": 16})
-            self.assertEqual([(next(m.channel for m in t if m.type == "program_change"),next(m.program for m in t if m.type == "program_change")) for t in result.tracks], [(5,21),(6,25),(7,27)])
+            self.assertEqual([(next(m.channel for m in t if m.type == "program_change"),next(m.program for m in t if m.type == "program_change")) for t in result.tracks], [(5,21),(6,25),(7,27),(8,16)])
             self.assertFalse(_target("Accordion", 21, 5))
 
     def test_overlap_processing_keeps_length_and_silence(self):
@@ -91,7 +91,7 @@ class BassOctaveTests(unittest.TestCase):
                 self.assertEqual(core.main(), 0)
             for name in ("bass.mid", "completo.mid"):
                 result = pretty_midi.PrettyMIDI(str(root / "out/midi" / name))
-                self.assertEqual([n.pitch for i in result.instruments for n in i.notes], [52])
+                self.assertEqual([n.pitch for i in result.instruments for n in i.notes], [40])
             self.assertEqual(inst.notes[0].pitch, 40)
 
 class SeparationCacheTests(unittest.TestCase):

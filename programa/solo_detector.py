@@ -1,15 +1,10 @@
 """Detecção e extração dedicada de solos de teclado/piano (PianoSolo).
 
 Atende estritamente à solicitação do usuário:
-"preciso que faça um piano somente para solos, pq eles estão se misturando no meio da musica,
-mas esse piano vai ter unica e exclusivamente a função de fazer um solo. Quero que o midiDream
-tenha a capacidade de detectar o solo no começo, no meio ou no final da musica e designe a função ao 'PianoSolo'".
-
-Princípios:
-1. Detecta intervalos de solo no Começo (Introdução), Meio (Interlúdios/gaps vocais/seções de solo) e Final (Encerramento).
-2. Extrai única e exclusivamente as frases melódicas e notas virtuosas de solo para a faixa 'Piano Solo' (Canal 8).
-3. Mantém 'Piano Solo' 100% silencioso durante as partes cantadas normais (sem misturar com base de acompanhamento).
-4. Remove as notas de solo da base de acompanhamento (piano.mid), evitando que solo e base fiquem embolados.
+1. 'O solo é pra ser feito por apenas 1 piano(no estado atual do programa ele é tocado por dois pianos),
+    defina apenas 1 teclado pro solo e o outro pra acompanhar'.
+2. 'ja o piano do solo tem liberdade pra flutuar em estacato, porém sem tocar notas que n existam'.
+3. 'Remove as notas de solo da base de acompanhamento (piano.mid e other.mid)'.
 """
 
 from __future__ import annotations
@@ -20,6 +15,9 @@ from typing import Any, Sequence
 import numpy as np
 import pretty_midi
 
+from accompaniment_cleanup import key_scale
+from music_guide import chord_notes, chord_triad_pcs
+
 
 def detect_solo_intervals(
     duration: float,
@@ -27,14 +25,6 @@ def detect_solo_intervals(
     guide_text: str | None = None,
     min_middle_gap: float = 2.4,
 ) -> list[dict[str, Any]]:
-    """Identifica os trechos temporais onde ocorrem solos: Começo, Meio e Final da música.
-
-    Retorna uma lista de dicionários com:
-    - start: início em segundos
-    - end: término em segundos
-    - type: 'comeco' | 'meio' | 'final'
-    - label: descrição amigável
-    """
     solo_intervals: list[dict[str, Any]] = []
     dur = float(duration) if duration and duration > 0 else 180.0
 
@@ -55,7 +45,6 @@ def detect_solo_intervals(
                 "label": f"Solo de Introdução (0.0s a {first_vocal_start:.2f}s)",
             })
     else:
-        # Sem transcrição vocal: primeiros 12 a 16 segundos são padrão de introdução
         intro_end = min(15.0, dur * 0.15)
         solo_intervals.append({
             "start": 0.0,
@@ -86,13 +75,6 @@ def detect_solo_intervals(
                         "label": f"Solo / Interlúdio Meio ({t1}s a {t2}s | '{w1}' -> '{w2}')",
                     })
 
-    # Se houver marcações textuais como [Solo], [Interlúdio], [Instrumental]
-    if guide_text:
-        import re
-        for m in re.finditer(r"\[(\d+:\d+(?:\.\d+)?\s+)?(solo|interl[uú]dio|instrumental|ponte|intro)\]", guide_text, re.IGNORECASE):
-            # Se tiver timestamp explícito
-            pass
-
     # 3. FINAL (Solo de Encerramento / Outro)
     if valid_words:
         last_vocal_end = float(valid_words[-1]["end"])
@@ -116,7 +98,6 @@ def detect_solo_intervals(
 
 
 def is_in_solo_window(time_sec: float, solo_intervals: Sequence[dict[str, Any]], margin: float = 0.08) -> bool:
-    """Verifica se um instante temporal pertence a algum dos trechos de solo."""
     for iv in solo_intervals:
         if (iv["start"] - margin) <= time_sec <= (iv["end"] + margin):
             return True
@@ -126,33 +107,54 @@ def is_in_solo_window(time_sec: float, solo_intervals: Sequence[dict[str, Any]],
 def split_piano_solo(
     piano_midi_path: str | Path,
     other_midi_path: str | Path | None = None,
+    drums_midi_path: str | Path | None = None,
     solo_intervals: Sequence[dict[str, Any]] | None = None,
     output_solo_path: str | Path | None = None,
     output_piano_path: str | Path | None = None,
     bpm: float = 120.0,
     solo_program: int = 0,
+    key: str | None = None,
+    chords: Sequence[tuple[float, str]] = (),
+    solo_instrument: str = "piano",
 ) -> dict[str, Any]:
-    """Separa o piano em duas faixas independentes e especializadas:
-
-    1. 'piano_solo.mid' (PianoSolo): Contém ÚNICA E EXCLUSIVAMENTE os solos de introdução,
-       meio e finalização. Fica silencioso nas partes cantadas.
-    2. 'piano.mid' (Piano Base): Acompanhamento harmônico e rítmico, limpo e sem notas
-       de solo emboladas no meio da música.
-    """
     piano_p = Path(piano_midi_path)
     if not piano_p.is_file():
         return {"solo_notes": 0, "base_notes": 0, "status": "no_piano_file"}
+
+    solo_norm = str(solo_instrument or "piano").lower().strip()
+    if any(g in solo_norm for g in ("electric", "eletrica", "elétrica", "guitarra", "guitar")):
+        solo_program = 27
+        solo_name = "Electric Guitar Solo"
+    elif any(a in solo_norm for a in ("violao", "violão", "acoustic", "acustico", "acústico")):
+        solo_program = 25
+        solo_name = "Acoustic Guitar Solo"
+    else:
+        solo_program = solo_program if solo_program != 0 else 0
+        solo_name = "Piano Solo"
 
     out_solo_p = Path(output_solo_path) if output_solo_path else piano_p.with_name("piano_solo.mid")
     out_piano_p = Path(output_piano_path) if output_piano_path else piano_p
 
     pm_piano = pretty_midi.PrettyMIDI(str(piano_p))
-    inst_piano = pm_piano.instruments[0] if pm_piano.instruments else None
-    if not inst_piano or not inst_piano.notes:
+    # Select the piano instrument with most notes as solo, others as accompaniment
+    piano_insts = [inst for inst in pm_piano.instruments if not inst.is_drum and inst.program == 0]
+    if not piano_insts:
+        return {"solo_notes": 0, "base_notes": 0, "status": "no_piano"}
+    # Choose solo instrument (most note density)
+    solo_inst = max(piano_insts, key=lambda i: len(i.notes))
+    # Re‑program other piano instruments to accompaniment program (default 1)
+    accompaniment_program = 1
+    for inst in piano_insts:
+        if inst is not solo_inst:
+            inst.program = accompaniment_program
+    solo_inst.program = 0  # ensure solo program
+    inst_piano = solo_inst
+    if not inst_piano.notes:
         return {"solo_notes": 0, "base_notes": 0, "status": "empty_piano"}
 
-    # Carrega também other.mid se existir para capturar possíveis notas melódicas de solo vazadas
+    # Carrega também other.mid se existir para capturar possíveis notas de solo vazadas
     other_notes = []
+    pm_oth = None
     if other_midi_path:
         oth_p = Path(other_midi_path)
         if oth_p.is_file():
@@ -163,13 +165,60 @@ def split_piano_solo(
             except Exception:
                 pass
 
+    # Carrega ataques da bateria para rejeitar transientes de percussão ('O piano do solo ta confundindo com a bateria')
+    drum_attacks = set()
+    if drums_midi_path:
+        dp = Path(drums_midi_path)
+        if dp.is_file():
+            try:
+                d_pm = pretty_midi.PrettyMIDI(str(dp))
+                for di in d_pm.instruments:
+                    if di.is_drum:
+                        for dn in di.notes:
+                            drum_attacks.add(round(dn.start, 3))
+            except Exception:
+                pass
+
     intervals = list(solo_intervals or [])
     if not intervals:
         dur = max((n.end for n in inst_piano.notes), default=60.0)
         intervals = detect_solo_intervals(duration=dur)
 
+    # Identifica a escala e acordes para conferência de notas existentes ('sem tocar notas que n existam')
+    scale = None
+    if key:
+        try:
+            scale = key_scale(key)
+        except Exception:
+            scale = None
+    if not scale and chords:
+        scale = set()
+        for _, sym in chords:
+            try:
+                scale.update(n % 12 for n in chord_notes(sym))
+            except Exception:
+                pass
+    if not scale:
+        scale = {0, 2, 4, 5, 7, 9, 11}
+
+    chord_events = sorted(chords, key=lambda c: c[0]) if chords else []
+
+    def get_chord_pcs(t: float) -> set[int]:
+        if not chord_events:
+            return scale
+        curr = chord_events[0][1]
+        for c_t, sym in chord_events:
+            if c_t <= t + 0.05:
+                curr = sym
+            else:
+                break
+        try:
+            return {n % 12 for n in chord_notes(curr)}
+        except Exception:
+            return scale
+
     all_piano_notes = sorted(inst_piano.notes, key=lambda n: (n.start, n.pitch))
-    solo_notes: list[pretty_midi.Note] = []
+    raw_solo_candidates: list[pretty_midi.Note] = []
     base_notes: list[pretty_midi.Note] = []
 
     # Agrupa notas por instante de ataque (janela de 40ms)
@@ -185,64 +234,113 @@ def split_piano_solo(
         in_solo = is_in_solo_window(c_start, intervals)
 
         if not in_solo:
-            # FORA DO SOLO: Todas as notas vão 100% para a base!
+            # FORA DO SOLO: Todas as notas vão 100% para a base de acompanhamento!
             # PianoSolo permanece estritamente silencioso aqui.
             for n in cluster:
                 base_notes.append(n)
         else:
             # DENTRO DO INTERVALO DE SOLO (Começo, Meio ou Final):
-            # 1. Se for monofônico (uma única nota tocando na melodia):
+            # Identifica a linha melódica principal de solo
             if len(cluster) == 1:
                 n = cluster[0]
-                if n.pitch >= 55:  # Nota melódica (Sol 3 para cima)
-                    # Dá ganho e brilho à nota de solo
-                    s_vel = int(np.clip(n.velocity * 1.15, 95, 118))
-                    solo_notes.append(
-                        pretty_midi.Note(velocity=s_vel, pitch=n.pitch, start=n.start, end=n.end)
-                    )
+                if n.pitch >= 55:
+                    raw_solo_candidates.append(n)
                 else:
-                    # Nota grave de apoio de baixo
                     base_notes.append(n)
             else:
-                # Polifônico durante o solo:
-                # A nota mais aguda (linha de soprano/melodia condutora) é o SOLO!
                 max_pitch = max(n.pitch for n in cluster)
                 for n in cluster:
                     if n.pitch == max_pitch and n.pitch >= 60:
-                        s_vel = int(np.clip(n.velocity * 1.15, 95, 118))
-                        solo_notes.append(
-                            pretty_midi.Note(velocity=s_vel, pitch=n.pitch, start=n.start, end=n.end)
-                        )
-                    else:
-                        # As outras notas formam o acompanhamento harmônico
+                        raw_solo_candidates.append(n)
+                    elif n.pitch < 60:
                         base_notes.append(n)
 
     # Verifica também em other_notes se há licks de solo nos intervalos que não estavam no piano
     if other_notes:
         for oth_n in other_notes:
             if is_in_solo_window(oth_n.start, intervals) and oth_n.pitch >= 65:
-                # Verifica se já não existe nota de solo nesse mesmo tempo e altura
                 is_duplicate = any(
                     abs(s.start - oth_n.start) < 0.05 and abs(s.pitch - oth_n.pitch) == 0
-                    for s in solo_notes
+                    for s in raw_solo_candidates
                 )
                 if not is_duplicate:
-                    s_vel = int(np.clip(oth_n.velocity * 1.15, 92, 115))
-                    solo_notes.append(
-                        pretty_midi.Note(velocity=s_vel, pitch=oth_n.pitch, start=oth_n.start, end=oth_n.end)
-                    )
+                    raw_solo_candidates.append(oth_n)
 
-    # Ordena e limpa solo_notes
+    # FILTRAGEM RIGOROSA DE NOTAS FANTASMAS E LIBERDADE DE STACCATO:
+    # 'ja o piano do solo tem liberdade pra flutuar em estacato, porém sem tocar notas que n existam'
+    solo_notes: list[pretty_midi.Note] = []
+    raw_solo_candidates.sort(key=lambda n: (n.start, n.pitch))
+
+    # Agrupa por tempo de ataque para priorizar linha de voz única (sem embolar com vazamentos)
+    solo_clusters: list[list[pretty_midi.Note]] = []
+    for n in raw_solo_candidates:
+        if not solo_clusters or abs(solo_clusters[-1][0].start - n.start) > 0.035:
+            solo_clusters.append([n])
+        else:
+            solo_clusters[-1].append(n)
+
+    for s_cluster in solo_clusters:
+        # Prioriza a nota principal melódica (mais aguda/mais forte)
+        lead_note = max(s_cluster, key=lambda n: n.pitch)
+        
+        # Filtro de notas fantasmas (ruído muito fraco ou espúrio)
+        if lead_note.velocity < 48 and lead_note.end - lead_note.start < 0.045:
+            continue
+
+        # Rejeita transientes de bateria que sangraram no canal do piano ('O piano do solo ta confundindo com a bateria')
+        dur = max(0.045, lead_note.end - lead_note.start)
+        if drum_attacks and dur < 0.12 and any(abs(lead_note.start - dt) <= 0.030 for dt in drum_attacks):
+            continue
+
+        pc = lead_note.pitch % 12
+        allowed_chord = get_chord_pcs(lead_note.start)
+        
+        # Correção harmônica: 'sem tocar notas que n existam'
+        if pc in scale or pc in allowed_chord:
+            final_pitch = lead_note.pitch
+        else:
+            allowed_union = scale | allowed_chord
+            closest_pc = min(allowed_union, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
+            octave = (lead_note.pitch // 12) * 12
+            candidates = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
+            final_pitch = min([c for c in candidates if 0 <= c <= 127], key=lambda c: abs(c - lead_note.pitch))
+
+        s_vel = int(np.clip(lead_note.velocity * 1.15, 95, 118))
+        
+        # Preserva articulação staccato original (sem alongamento artificial forçado)
+        dur = max(0.045, lead_note.end - lead_note.start)
+        solo_notes.append(
+            pretty_midi.Note(
+                velocity=s_vel,
+                pitch=int(final_pitch),
+                start=float(lead_note.start),
+                end=float(lead_note.start + dur),
+            )
+        )
+
+    # Remove duplicatas
     solo_notes.sort(key=lambda n: (n.start, n.pitch))
     cleaned_solo = []
     for n in solo_notes:
-        if cleaned_solo and abs(cleaned_solo[-1].start - n.start) < 0.02 and cleaned_solo[-1].pitch == n.pitch:
+        if cleaned_solo and abs(cleaned_solo[-1].start - n.start) < 0.025 and cleaned_solo[-1].pitch == n.pitch:
             continue
         cleaned_solo.append(n)
     solo_notes = cleaned_solo
 
-    # Cria Instrumento Piano Solo (Canal 8 / Program solo_program)
-    solo_inst = pretty_midi.Instrument(program=solo_program, name="Piano Solo")
+    # CRUCIAL: Limpa other.mid para NUNCA tocar notas de solo!
+    # 'O solo é pra ser feito por apenas 1 piano (no estado atual do programa ele é tocado por dois pianos)'
+    if pm_oth and other_midi_path:
+        cleaned_oth_notes = []
+        for oth_n in pm_oth.instruments[0].notes:
+            # Se a nota coincide exatamente com a nota melódica de solo, remove de other para não duplicar
+            if any(abs(s.start - oth_n.start) < 0.05 and s.pitch == oth_n.pitch for s in solo_notes):
+                continue
+            cleaned_oth_notes.append(oth_n)
+        pm_oth.instruments[0].notes = cleaned_oth_notes
+        pm_oth.write(str(other_midi_path))
+
+    # Cria Instrumento Solo (Canal 8 / Program solo_program)
+    solo_inst = pretty_midi.Instrument(program=solo_program, name=solo_name)
     solo_inst.notes = solo_notes
 
     # Cria Instrumento Piano Base (Canal 2 / Program 0)
@@ -256,13 +354,12 @@ def split_piano_solo(
     out_solo_p.parent.mkdir(parents=True, exist_ok=True)
     pm_solo.write(str(out_solo_p))
 
-    # Salva piano.mid (base limpa)
+    # Salva piano.mid (base limpa sem notas de solo)
     pm_base = pretty_midi.PrettyMIDI(initial_tempo=bpm, resolution=480)
     pm_base.instruments.append(base_inst)
     out_piano_p.parent.mkdir(parents=True, exist_ok=True)
     pm_base.write(str(out_piano_p))
 
-    # Contagem de solos por tipo
     comeco_count = sum(1 for n in solo_notes if any(iv["type"] == "comeco" and iv["start"] <= n.start <= iv["end"] for iv in intervals))
     meio_count = sum(1 for n in solo_notes if any(iv["type"] == "meio" and iv["start"] <= n.start <= iv["end"] for iv in intervals))
     final_count = sum(1 for n in solo_notes if any(iv["type"] == "final" and iv["start"] <= n.start <= iv["end"] for iv in intervals))

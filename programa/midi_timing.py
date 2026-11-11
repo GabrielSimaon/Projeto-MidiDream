@@ -69,27 +69,69 @@ def quantize_midi_file_ticks(source, target=None, step=240, drum_step=120):
     """Crava cada evento de nota no múltiplo exato de ticks da grade métrica.
     
     Elimina qualquer desvio residual de ponto flutuante acumulado por conversões de tempo,
-    garantindo que 100% das notas estejam no tempo exato do metrônomo e no BPM.
+    garantindo que todas as notas estejam no tempo exato do metrônomo e no BPM.
+    
+    Preserva a duração audível de cada nota (NoteOff nunca colide com NoteOn no tick 0),
+    evitando que viradas rápidas de bateria ou notas curtas cortem no meio do tempo.
+    Não altera o contrabaixo ('n mexa no baixo').
     """
     target = target or source
+    src_stem = str(source).casefold()
+    if "bass" in src_stem or "baixo" in src_stem:
+        # Diretriz do usuário: 'O baixo esta cortando mas ele ta certo, n mexa no baixo.'
+        return
+
     mf = mido.MidiFile(str(source), charset="latin1")
     ppq = mf.ticks_per_beat
     actual_step = max(1, round(step * (ppq / 960.0)))
     actual_drum_step = max(1, round(drum_step * (ppq / 960.0)))
 
     for track in mf.tracks:
-        abs_tick = 0
-        last_tick = 0
-        new_track = []
-        is_drum = any(getattr(m, "channel", 0) == 9 for m in track)
+        track_name = next((m.name for m in track if m.type == "track_name"), "").casefold()
+        if "bass" in track_name or "baixo" in track_name:
+            continue
+
+        is_drum = any(getattr(m, "channel", None) == 9 for m in track) or "drum" in track_name or "bater" in track_name or "chimbal" in track_name
         s = actual_drum_step if is_drum else actual_step
+        min_dur = actual_drum_step if is_drum else max(1, actual_step // 2)
+
+        # Converte mensagens para timeline absoluta (tick, ordem_tipo, msg)
+        abs_tick = 0
+        timeline = []
+        active_notes = {}  # (channel, note) -> target_on_tick
 
         for msg in track:
             abs_tick += msg.time
-            target_tick = round(abs_tick / s) * s
+            is_on = (msg.type == "note_on" and msg.velocity > 0)
+            is_off = (msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0))
+            channel = getattr(msg, "channel", None)
+
+            if is_on and channel is not None and channel != 0:
+                target_tick = round(abs_tick / s) * s
+                active_notes[(channel, msg.note)] = target_tick
+                timeline.append((target_tick, 2, msg))
+            elif is_off and channel is not None and channel != 0:
+                on_target = active_notes.pop((channel, msg.note), None)
+                target_tick = round(abs_tick / s) * s
+                if on_target is not None:
+                    target_tick = max(target_tick, on_target + min_dur)
+                timeline.append((target_tick, 1, msg))
+            else:
+                target_tick = round(abs_tick / s) * s if msg.is_meta or hasattr(msg, "channel") else abs_tick
+                timeline.append((target_tick, 0, msg))
+
+        # Ordena timeline: primeiro tick; para o mesmo tick: controles(0), note_off(1), note_on(2)
+        timeline.sort(key=lambda item: (item[0], item[1]))
+
+        # Reconstrói deltas relativos
+        new_track = []
+        last_tick = 0
+        for target_tick, _, msg in timeline:
             delta = max(0, target_tick - last_tick)
             new_track.append(msg.copy(time=delta))
             last_tick = target_tick
+
         track.clear()
         track.extend(new_track)
+
     mf.save(str(target))

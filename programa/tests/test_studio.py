@@ -177,7 +177,7 @@ class StudioTests(unittest.TestCase):
         revise_lyrics(
             result, [{"seconds": 1.5, "text": "ação"}, {"seconds": 2, "text": "[QUEBRA]"}]
         )
-        self.assertEqual(json.loads(result["events_path"].read_text())[0]["text"], "ação")
+        self.assertEqual(json.loads(result["events_path"].read_text(encoding="utf-8"))[0]["text"], "ação")
         self.assertFalse(
             any(m.type == "lyrics" for t in mido.MidiFile(result["combined_mid"]).tracks for m in t)
         )

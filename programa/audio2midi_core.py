@@ -91,24 +91,24 @@ STEM_PARAMS = {
         "min_vel": 10,
     },
     "piano": {
-        "onset": 0.42,
-        "frame": 0.25,
-        "min_len": 40.0,
+        "onset": 0.45,
+        "frame": 0.28,
+        "min_len": 45.0,
         "fmin": 27.5,
         "fmax": 4186.0,
         "pmin": 21,
         "pmax": 108,
-        "min_vel": 10,
+        "min_vel": 24,
     },
     "other": {
-        "onset": 0.40,
-        "frame": 0.24,
-        "min_len": 40.0,
+        "onset": 0.44,
+        "frame": 0.26,
+        "min_len": 45.0,
         "fmin": 80.0,
         "fmax": 2200.0,
         "pmin": 41,
         "pmax": 86,
-        "min_vel": 10,
+        "min_vel": 24,
     },
 }
 
@@ -331,23 +331,11 @@ def analyze_metronome(
         if bpm_hint is not None
         else (bpm_detected if bpm_detected else (bpm_audio if bpm_audio else 120.0))
     )
-    # O MIDI mantém o BPM informado, mas a grade segue o pulso real do áudio.
-    grid_bpm = bpm
-    if bpm_hint is not None and metro_path is None and reference_path is not None:
-        measured = estimate_beat_grid(reference_path, float(bpm_hint), fast=fast)
-        if measured is not None:
-            grid_bpm, phase = measured
-            anchor = float(phase % (60.0 / grid_bpm / max(1, sub_div)))
-            print(
-                f"[tempo] Pulso medido no áudio: {grid_bpm:.2f} BPM (informado: {bpm:.2f}); "
-                "a grade segue o áudio.",
-                flush=True,
-            )
-        else:
-            print("[aviso] Sem pulso claro no áudio; a grade usa o BPM informado.", flush=True)
-    # No padrão MIDI, o compasso 1 tempo 1 começa em tick 0 (0.0s).
-    # A âncora em 0.0 garante que as notas fiquem 100% no tempo dos players de MIDI/Karaokê.
-    grid = build_grid(max_duration=max_duration, bpm=grid_bpm, sub_div=sub_div, anchor=0.0)
+    measured = None
+    if reference_path is not None:
+        measured = estimate_beat_grid(Path(reference_path), bpm, fast=fast)
+    grid_bpm, anchor = (bpm, 0.0) if measured is None else measured
+    grid = build_grid(max_duration=max_duration, bpm=grid_bpm, sub_div=sub_div, anchor=anchor)
     if bpm_hint is not None:
         print(f"[tempo] BPM informado: {bpm:.2f}")
     elif bpm_detected is not None:
@@ -636,6 +624,7 @@ def transcribe_drums(
             cym_frac >= 0.18
             and (cym_strength >= 0.40 or float(flux["cym_low"][idx] / q95["cym_low"]) >= 0.45)
             and (late / (early + 1e-12) >= 0.15 or late_high / (early_high + 1e-12) >= 0.18)
+            and not (body_frac >= 0.20 and has_snare_noise)
             and not (body_frac >= 0.25 and snare_strength >= cym_strength * 1.05)
         )
         if is_crash:
@@ -656,9 +645,9 @@ def transcribe_drums(
         # 3. Caixa (Snare - MIDI 38): corpo médio + esteira acústica (exclusiva contra tom e bumbo)
         is_snare = (
             not is_kick
-            and body_frac >= 0.14
-            and snare_strength >= 0.44
-            and (has_snare_noise or tom_pitch is None)
+            and body_frac >= 0.13
+            and snare_strength >= 0.40
+            and (has_snare_noise or tom_pitch is None or tom_strength < 0.50)
             and not (cym_frac > 0.45 and cym_strength > snare_strength * 1.25)
             and not is_crash
         )
@@ -672,21 +661,26 @@ def transcribe_drums(
             and not is_snare
             and not is_crash
             and tom_pitch is not None
-            and (tom_strength >= 0.35 or (body_frac >= 0.22 and not has_snare_noise))
+            and not has_snare_noise
+            and tom_strength >= 0.50
         )
         if is_tom:
             velocity = int(np.clip(82 + 38 * np.sqrt(max(0.1, tom_strength)), 78, 127))
             detected.append((tom_pitch, velocity, 0.20))
 
         # 5. Prato de Condução (Ride - MIDI 51): condução com corpo metálico em cym_low sem esteira de caixa
+        # Importante: o chimbal aberto (46) tem forte brilho agudo em cym_high.
+        # O Ride genuíno possui ataque focado no sino/corpo (cym_low) com cym_high significativamente menor.
         low_strength = float(flux["cym_low"][idx] / q95["cym_low"])
+        high_strength = float(flux["cym_high"][idx] / q95["cym_high"])
         is_ride = (
             not is_crash
             and not is_snare
             and not is_kick
-            and low_strength >= 0.40
-            and cym_frac >= 0.20
-            and flux["cym_low"][idx] >= flux["cym_high"][idx] * 0.70
+            and low_strength >= 0.50
+            and cym_frac >= 0.22
+            and flux["cym_low"][idx] >= flux["cym_high"][idx] * 1.35
+            and high_strength < 0.45
         )
         if is_ride:
             velocity = int(np.clip(72 + 25 * np.sqrt(low_strength), 68, 108))
@@ -705,7 +699,9 @@ def transcribe_drums(
         first_density = first / max(1, early_stop - max(0, idx - 1))
         tail_density = tail / max(1, late_stop - early_stop)
         high_flux_share = float(flux["cym_high"][idx] / (cym_flux[idx] + 1e-12))
-        if high_strength < 0.28 or first <= 1e-10:
+        tot_energy = energy(slice(None), max(0, idx - 1), early_stop) + 1e-12
+        high_frac = first / tot_energy
+        if high_strength < 0.28 or first <= 1e-10 or high_frac < 0.035:
             continue
         if high_flux_share < 0.35 and tail_density >= first_density * 0.85:
             continue
@@ -713,7 +709,7 @@ def transcribe_drums(
 
         # Chimbal aberto vs fechado: cauda de sustentação mais longa no prato aberto
         tail_ratio = tail_density / (first_density + 1e-12)
-        if tail_ratio >= 0.35 and high_strength >= 0.42:
+        if tail_ratio >= 0.45 or (tail_ratio >= 0.38 and high_strength >= 0.42):
             hat_pitch = 46  # Open Hi-Hat
             hat_dur = 0.15
         else:
@@ -723,40 +719,37 @@ def transcribe_drums(
         velocity = int(np.clip(68 + 20 * np.sqrt(high_strength), 55, 110))
         drum_inst.notes.append(pretty_midi.Note(velocity, hat_pitch, time, time + hat_dur))
 
-    # ANÁLISE CONTEXTUAL DO GROOVE E INJEÇÃO DE CHIMBAL:
-    # O chimbal deve soar quase todas as vezes que o bumbo e a caixa aparecem,
-    # exceto em viradas (fills com tons ou rufos de caixa) ou ataques de pratos.
-    current_notes = sorted(drum_inst.notes, key=lambda n: n.start)
-    tom_times = [n.start for n in current_notes if n.pitch in TOM_NOTES]
-    cymbal_times = [n.start for n in current_notes if n.pitch in (49, 51, 57)]
-    hat_times = [n.start for n in current_notes if n.pitch in (42, 44, 46)]
-    snare_times = [n.start for n in current_notes if n.pitch == 38]
+    # Desambiguação de Ride (51) vs Chimbal Aberto (46):
+    # Chimbal aberto tem cauda metálica ampla que pode ressoar na faixa de condução.
+    # Bateristas tocam chimbal OU condução na mão condutora; nunca os dois simultâneos.
+    # Se houver um Ride (51) simultâneo (±0.065s) a uma batida de chimbal (42 ou 46):
+    # Trata-se inequivocamente de Chimbal Aberto (46), e o Ride falso é removido.
+    rides = [n for n in drum_inst.notes if n.pitch == 51]
+    hats = [n for n in drum_inst.notes if n.pitch in (42, 44, 46)]
+    ride_to_remove = set()
+    for r in rides:
+        nearby_hats = [h for h in hats if abs(h.start - r.start) < 0.065]
+        if nearby_hats:
+            ride_to_remove.add(id(r))
+            for h in nearby_hats:
+                h.pitch = 46  # Promove para Chimbal Aberto
+                h.end = max(h.end, h.start + 0.15)
+                h.velocity = max(h.velocity, r.velocity)
 
-    additional_hats = []
-    for n in current_notes:
-        if n.pitch in (36, 38):  # Bumbo ou Caixa
-            t = n.start
-            # 1. Silencia chimbal em viradas de bateria (tons ou surdos próximos)
-            is_fill = any(abs(t - tom_t) < 0.25 for tom_t in tom_times)
-            # 2. Silencia em rufos de caixa (mais de 2 caixas em menos de 0.35s)
-            is_snare_roll = sum(1 for st in snare_times if abs(t - st) < 0.35) >= 3
-            # 3. Silencia se houver ataque simultâneo de prato (Crash ou Ride)
-            has_cymbal = any(abs(t - ct) < 0.05 for ct in cymbal_times)
-            # 4. Verifica se já existe chimbal nesse ataque
-            has_hat = any(abs(t - ht) < 0.045 for ht in hat_times)
+    drum_inst.notes = [n for n in drum_inst.notes if id(n) not in ride_to_remove]
 
-            if not is_fill and not is_snare_roll and not has_cymbal and not has_hat:
-                hat_vel = int(np.clip(n.velocity * 0.85, 70, 95))
-                additional_hats.append(pretty_midi.Note(hat_vel, 42, t, t + 0.055))
-                hat_times.append(t)
 
-    drum_inst.notes.extend(additional_hats)
-
+    tom_times = [n.start for n in drum_inst.notes if n.pitch in TOM_NOTES]
     suppressed = []
     last_by_pitch = {}
     for note in sorted(drum_inst.notes, key=lambda n: (n.start, n.pitch)):
         previous = last_by_pitch.get(note.pitch)
-        gap = {36: 0.07, 38: 0.08, 41: 0.08, 42: 0.065, 43: 0.08, 45: 0.08, 46: 0.08, 47: 0.08, 48: 0.08, 49: 0.40, 50: 0.08, 51: 0.08}.get(note.pitch, 0.055)
+        # Em viradas (fills com tons ou rufos), reduz o gap para permitir batidas consecutivas rápidas sem cortar
+        in_fill = any(abs(note.start - tt) < 0.50 for tt in tom_times) or note.pitch in TOM_NOTES
+        if in_fill and note.pitch in (38, 41, 43, 45, 47, 48, 50):
+            gap = 0.038
+        else:
+            gap = {36: 0.07, 38: 0.08, 41: 0.08, 42: 0.065, 43: 0.08, 45: 0.08, 46: 0.08, 47: 0.08, 48: 0.08, 49: 0.40, 50: 0.08, 51: 0.08}.get(note.pitch, 0.055)
         if previous is not None and note.start - previous.start < gap:
             if note.velocity > previous.velocity:
                 suppressed.remove(previous)
@@ -936,15 +929,9 @@ def main() -> int:
             sub_div=max(1, args.grid // 4),
             anchor=float(style_profile["grid_anchor"]),
         )
-    # A bateria mantém sua grade mesmo quando o usuário preserva os tempos vocais.
-    drum_anchor = float(grid_times[0]) if len(grid_times) else 0.0
-    # O período da bateria vem da grade medida, não do BPM digitado.
-    grid_sub = max(1, args.grid // 4)
-    grid_bpm = (
-        60.0 / (float(np.median(np.diff(grid_times))) * grid_sub) if len(grid_times) > 1 else bpm
-    )
+    # A bateria é cravada com precisão absoluta no BPM da música
     drum_grid_times = build_grid(
-        max_duration, grid_bpm, sub_div=args.drum_grid // 4, anchor=drum_anchor
+        max_duration, bpm, sub_div=args.drum_grid // 4, anchor=0.0
     )
     print("[faixas] " + ", ".join(f"{name} ({path.name})" for name, path in sorted(stems.items())))
 
@@ -1048,11 +1035,10 @@ def main() -> int:
                     f"  [limpeza] {name}: {cleanup_report['before']} -> {cleanup_report['after']} notas; simultâneas {cleanup_report['max_polyphony_before']} -> {cleanup_report['max_polyphony_after']}",
                     flush=True,
                 )
-            if name == "bass":
-                from bass_pitch import sustain_bass_groove
-                midi = sustain_bass_groove(midi, bpm=bpm)
+            # Diretriz do usuário: 'O baixo esta cortando mas ele ta certo, n mexa no baixo'
+            # Mantém durações originais detectadas sem forçar sustentação artificial
+
             prog, label = GM_PROGRAMS.get(name, (0, name.title()))
-            prog = int(style_profile.get("stats", {}).get(name, {}).get("program", prog))
             for inst in midi.instruments:
                 inst.program, inst.name = prog, label
             final_count = sum(len(inst.notes) for inst in midi.instruments)
@@ -1088,9 +1074,27 @@ def main() -> int:
                 for s_name, s_mid in stems_midi_map.items():
                     s_mid.write(str(midi_dir / f"{s_name}.mid"))
                 combined.instruments = []
-                for s_name in sorted(stems_midi_map):
+                # Organiza as faixas na ordem musical padrão (Piano, Piano Solo, Bateria, Chimbal, Violão, Baixo, Outros, Voz)
+                def _inst_sort_rank(inst):
+                    nm = (inst.name or "").lower()
+                    if "piano" in nm and "solo" not in nm:
+                        return 1
+                    if "solo" in nm:
+                        return 2
+                    if inst.is_drum or "drum" in nm or "bateria" in nm:
+                        return 4 if ("chimbal" in nm or "hihat" in nm) else 3
+                    if any(g in nm for g in ("guitar", "viol", "steel", "acoust")):
+                        return 5
+                    if "bass" in nm or "baixo" in nm:
+                        return 6
+                    if "other" in nm or "pad" in nm or "acompanhamento" in nm:
+                        return 7
+                    return 8
+
+                for s_name in stems_midi_map:
                     for inst in stems_midi_map[s_name].instruments:
                         combined.instruments.append(inst)
+                combined.instruments.sort(key=_inst_sort_rank)
                 total_notes = sum(len(i.notes) for i in combined.instruments)
     except Exception as exc:
         print(f"  [aviso] Limpeza de vazamento: {exc}")

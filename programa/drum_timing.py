@@ -8,7 +8,7 @@ import pretty_midi
 HIHAT_NOTES = {42, 44, 46}
 
 
-def quantize_drums(midi, bpm, grid_times, grid=16):
+def quantize_drums(midi, bpm, grid_times, grid=16, hihat_grid_times=None):
     """Alinha ataques da bateria com precisão métrica na grade do BPM da música.
 
     Garante que bumbo, caixa, chimbal e pratos fiquem perfeitamente no tempo da música,
@@ -16,8 +16,17 @@ def quantize_drums(midi, bpm, grid_times, grid=16):
     """
     if not grid:
         return midi
-    step = 60.0 / float(bpm) * 4.0 / float(grid)
-    times = np.asarray(grid_times, dtype=float)
+    bpm_val = float(bpm) if bpm and float(bpm) > 0 else 120.0
+    effective_grid = 32 if (bpm_val < 95.0 and grid == 16) else grid
+    step = 60.0 / bpm_val * 4.0 / float(effective_grid)
+    # Combine user-provided grid with optional hi‑hat grid for a unified timing reference.
+    base_times = np.asarray(grid_times, dtype=float)
+    if hihat_grid_times is not None:
+        # Merge and deduplicate, keeping sorted order.
+        combined = np.unique(np.concatenate([base_times, np.asarray(hihat_grid_times, dtype=float)]))
+    else:
+        combined = base_times
+    times = combined
 
     # Cria pontos de apoio refinados (subdivisão de fusas / 32avos) para acomodar viradas rápidas
     if len(times) > 1:
@@ -27,44 +36,57 @@ def quantize_drums(midi, bpm, grid_times, grid=16):
     else:
         times_32 = times
 
+    tom_notes_set = {41, 43, 45, 47, 48, 50}
+    tom_times = [n.start for inst in midi.instruments if inst.is_drum for n in inst.notes if n.pitch in tom_notes_set]
+    snare_times = [n.start for inst in midi.instruments if inst.is_drum for n in inst.notes if n.pitch in (38, 40)]
+
     for instrument in midi.instruments:
         if not instrument.is_drum:
             continue
         slots = {}
         for note in instrument.notes:
-            is_groove_core = note.pitch in (35, 36, 38, 40, 42, 44, 46, 49, 51)
+            # Identifica se a nota faz parte de uma virada real (rufos rápidos de caixa ou múltiplos tons)
+            is_tom = note.pitch in tom_notes_set
+            is_fill = (
+                is_tom and sum(1 for tt in tom_times if abs(note.start - tt) < 0.45) >= 2
+            ) or (
+                note.pitch in (38, 40) and sum(1 for st in snare_times if abs(note.start - st) < 0.35) >= 3
+            )
+            is_groove_core = (note.pitch in (35, 36, 38, 40, 42, 44, 46, 49, 51)) and not is_fill
 
-            if len(times_32):
-                # Se for groove principal (bumbo, caixa, chimbal, prato), busca na grade principal de 16avos primeiro
-                if is_groove_core and len(times):
-                    idx_main = int(np.searchsorted(times, note.start))
-                    cand_main = times[max(0, idx_main - 1) : min(len(times), idx_main + 1)]
-                    closest_main = float(min(cand_main, key=lambda v: abs(v - note.start)))
-                    # Atração firme na grade principal de 16avos (até 48% do passo)
-                    if abs(note.start - closest_main) <= step * 0.48:
-                        start = closest_main
-                    else:
-                        # Se estiver mais longe, verifica a subdivisão de 32avos
-                        idx_fine = int(np.searchsorted(times_32, note.start))
-                        cand_fine = times_32[max(0, idx_fine - 1) : min(len(times_32), idx_fine + 1)]
-                        closest_fine = float(min(cand_fine, key=lambda v: abs(v - note.start)))
-                        start = closest_fine
-                else:
-                    # Viradas de tons/surdos: busca na grade refinada de 32avos
-                    idx_fine = int(np.searchsorted(times_32, note.start))
-                    cand_fine = times_32[max(0, idx_fine - 1) : min(len(times_32), idx_fine + 1)]
-                    closest_fine = float(min(cand_fine, key=lambda v: abs(v - note.start)))
-                    start = closest_fine
+            if is_fill and len(times_32):
+                # Viradas de bateria (tons, surdos e caixas rápidas): grade refinada de 32avos
+                idx_fine = int(np.searchsorted(times_32, note.start))
+                cand_fine = times_32[max(0, idx_fine - 1) : min(len(times_32), idx_fine + 2)]
+                start = float(min(cand_fine, key=lambda v: abs(v - note.start)))
+            elif len(times):
+                idx_main = int(np.searchsorted(times, note.start))
+                cand_main = times[max(0, idx_main - 1) : min(len(times), idx_main + 2)]
+                start = float(min(cand_main, key=lambda v: abs(v - note.start)))
             else:
-                start = max(0.0, round(note.start / (step / 2.0)) * (step / 2.0))
+                s_step = (step / 4.0) if is_fill else (step / 2.0)
+                start = max(0.0, round(note.start / s_step) * s_step)
 
             key = (note.pitch, round(start, 5))
             previous = slots.get(key)
-            if previous is None or note.velocity > previous.velocity:
+            if previous is None:
                 revised = copy.copy(note)
                 revised.start = start
-                revised.end = start + max(0.02, note.end - note.start)
+                revised.end = start + max(0.045, note.end - note.start)
                 slots[key] = revised
+            elif is_fill and abs(note.start - previous.start) >= 0.035:
+                # Em viradas rápidas (rufos/rolls), preserva as batidas consecutivas sem descartar
+                step_shift = (step / 2.0) if len(times_32) else 0.05
+                next_start = start + step_shift
+                next_key = (note.pitch, round(next_start, 5))
+                if next_key not in slots:
+                    revised = copy.copy(note)
+                    revised.start = next_start
+                    revised.end = next_start + max(0.045, note.end - note.start)
+                    slots[next_key] = revised
+            elif note.velocity > previous.velocity:
+                previous.velocity = note.velocity
+                previous.end = max(previous.end, start + max(0.045, note.end - note.start))
 
         # Sincroniza bumbo, caixa e chimbal que acontecem juntos no mesmo ataque rítmico
         notes = sorted(slots.values(), key=lambda note: (note.start, note.pitch))
@@ -93,7 +115,8 @@ def quantize_drums(midi, bpm, grid_times, grid=16):
         for note in sorted(aligned_groove, key=lambda n: (n.start, n.pitch)):
             previous = previous_by_pitch.get(note.pitch)
             if previous is not None:
-                previous.end = min(previous.end, note.start)
+                if note.start > previous.start:
+                    previous.end = min(previous.end, note.start)
             previous_by_pitch[note.pitch] = note
         instrument.notes = sorted(aligned_groove, key=lambda n: (n.start, n.pitch))
     return midi

@@ -100,7 +100,11 @@ def recover_result(job):
     data.setdefault("include_stems", False)
     data.setdefault("duration", midi.length)
     try:
-        words = json.loads((result_dir / "palavras.json").read_text(encoding="utf-8"))
+        raw_words = (result_dir / "palavras.json").read_bytes()
+        try:
+            words = json.loads(raw_words.decode("utf-8"))
+        except UnicodeDecodeError:
+            words = json.loads(raw_words.decode("latin-1"))
         word_count = len(words) if isinstance(words, list) else 0
     except (OSError, ValueError):
         word_count = 0

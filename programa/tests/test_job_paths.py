@@ -2,6 +2,7 @@ import sys, tempfile, json, shutil, unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from job_paths import repair_paths, find_moved_input, find_moved_job
 from song_names import rename_song_result
 from saved_results import save_result_state, recover_result
@@ -54,7 +55,7 @@ class PathRecoveryTests(unittest.TestCase):
             result = recover_result(job)
             for field in ("source_audio", "combined_mid", "archive", "events_path"):
                 self.assertTrue(Path(result[field]).is_file(), field)
-            saved = json.loads((Path(result["job_dir"]) / "resultado_salvo.json").read_text())
+            saved = json.loads((Path(result["job_dir"]) / "resultado_salvo.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["_relative_paths"]["source_audio"], "entrada/" + source.name)
 
     def test_ambiguous_missing_audio_is_not_guessed(self):

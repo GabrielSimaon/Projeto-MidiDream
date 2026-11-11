@@ -30,3 +30,4 @@ $RECYCLE.BIN/
 # Backups locais
 *.bak
 *.swp
+fix_midi_order.py

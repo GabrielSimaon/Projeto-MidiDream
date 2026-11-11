@@ -500,8 +500,10 @@ def add_chord_track(path, text, marks, detected, duration):
     midi.save(path)
 
 
-def validate_required_inputs(guide, bpm=None):
-    """Valida entradas da interface antes de criar pasta ou iniciar conversão."""
+def validate_required_inputs(guide, bpm=None, require_bpm=False):
+    """Valida entradas da interface antes de criar pasta ou iniciar conversao."""
+    if require_bpm and (bpm is None or not str(bpm).strip()):
+        raise ValueError("Informe o BPM da musica.")
     value = None
     if bpm is not None and str(bpm).strip():
         try:

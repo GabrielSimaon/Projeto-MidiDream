@@ -1,16 +1,20 @@
-"""Aprimoramento harmônico e rítmico dos teclados (piano.mid e other.mid).
+"""Separação e aprimoramento multi-instrumental dos stems de acompanhamento.
 
-Atende às diretrizes musicais do usuário:
-1. Afinação estrita com as cifras ativas da música (elimina notas desafinadas).
-2. Marcação e ênfase rítmica no tempo da música para guiar o canto.
-3. Piano (piano.mid) atua na marcação rítmica (pulsação clara nas batidas).
-4. Outros teclados (other.mid) fornecem a cama harmônica / sustentação suave.
-5. Permite cantar por cima com harmonia consonante e andamento firme.
+Atende estritamente às diretrizes do usuário:
+1. 'na pasta motor midi o mid ta quase certo, o midi do motor mid tem q separar os instrumentos
+    pq o piano 1 ta fazendo um monte de instrumento'.
+2. NUNCA inventa notas aleatórias / sintéticas: todas as notas vêm estritamente da transcrição
+    real gravada no áudio (motor_midi / other.mid / piano 1).
+3. 'O solo é pra ser feito por apenas 1 piano, defina apenas 1 teclado pro solo e o outro pra acompanhar'.
+4. 'o piano que vai acompanhar vai tocar a nota sem estacar(dar petelecos) quero que ele segure um pouco'.
+5. 'ja o piano do solo tem liberdade pra flutuar em estacato, porém sem tocar notas que n existam'.
+6. 'Na música há violões porem no mid nao há, o violão tem que ser simples também'.
 """
 
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Sequence
 
@@ -18,269 +22,142 @@ import numpy as np
 import pretty_midi
 
 from midi_timing import make_instrumental
-from music_guide import chord_notes, chord_root_and_bass, chord_triad_pcs
-from accompaniment_cleanup import key_scale
+from lyrics import remap_channels
+from auto_mix import apply_auto_mix, calculate_relative_volumes
+from solo_detector import detect_solo_intervals, is_in_solo_window
 
 
-def _get_chord_intervals(
-    chords: Sequence[tuple[float, str]], duration: float, default_key: str | None = None
-) -> list[dict]:
-    """Constrói os intervalos temporais de cada acorde com suas notas constitutivas, tríade fundamental e escala."""
-    scale = key_scale(default_key) if default_key else {0, 2, 4, 5, 7, 9, 11}
-    if not chords:
-        return [
-            {
-                "start": 0.0,
-                "end": max(duration, 60.0),
-                "symbol": default_key or "C",
-                "notes": scale,
-                "triad": {min(scale), (min(scale) + 4) % 12, (min(scale) + 7) % 12},
-                "scale": scale,
-                "root": min(scale),
-                "bass": min(scale),
-            }
-        ]
+def separate_accompaniment_instruments(
+    input_notes: list[pretty_midi.Note],
+    solo_intervals: Sequence[dict] = (),
+    bpm: float = 120.0,
+) -> dict[str, list[pretty_midi.Note]]:
+    """Separa as notas reais do acompanhamento em faixas de instrumentos dedicados.
 
-    intervals = []
-    events = sorted(chords, key=lambda c: c[0])
-    for idx, (t_start, symbol) in enumerate(events):
-        nxt_start = events[idx + 1][0] if idx + 1 < len(events) else max(duration, t_start + 4.0)
-        try:
-            c_notes = {n % 12 for n in chord_notes(symbol)}
-            root_pc, bass_pc = chord_root_and_bass(symbol)
-            _, triad_pcs = chord_triad_pcs(symbol)
-        except Exception:
-            c_notes = {0, 4, 7}
-            root_pc, bass_pc = 0, 0
-            triad_pcs = {0, 4, 7}
-        intervals.append(
-            {
-                "start": float(t_start),
-                "end": float(nxt_start),
-                "symbol": symbol,
-                "notes": c_notes,
-                "triad": triad_pcs,
-                "scale": scale,
-                "root": root_pc,
-                "bass": bass_pc,
-            }
-        )
-    return intervals
-
-
-def _find_active_interval(intervals: list[dict], time_sec: float) -> dict:
-    """Localiza o acorde ativo para o instante de tempo."""
-    if not intervals:
+    Nenhuma nota é inventada. Todas as notas derivam do áudio original transcrito.
+    """
+    if not input_notes:
         return {
-            "notes": {0, 4, 7},
-            "triad": {0, 4, 7},
-            "scale": {0, 2, 4, 5, 7, 9, 11},
-            "root": 0,
-            "bass": 0,
-            "symbol": "C",
+            "piano_solo": [],
+            "piano_base": [],
+            "guitar": [],
+            "accordion": [],
+            "pad": [],
         }
-    for iv in reversed(intervals):
-        if iv["start"] <= time_sec + 0.03:
-            return iv
-    return intervals[0]
 
+    sorted_notes = sorted(input_notes, key=lambda n: (n.start, n.pitch))
 
-def _chord_voicing(chord_pcs: set[int], low_midi: int = 60, high_midi: int = 76) -> list[int]:
-    """Gera um voicing consonante fechado na tessitura desejada contendo todas as notas fundamentais da tríade."""
-    import itertools
+    # Agrupa notas por ataques simultâneos (cluster de acordes / dedilhado em janela de 35ms)
+    clusters: list[list[pretty_midi.Note]] = []
+    for n in sorted_notes:
+        if not clusters or (n.start - clusters[-1][0].start) > 0.035:
+            clusters.append([n])
+        else:
+            clusters[-1].append(n)
 
-    pcs = sorted(chord_pcs)
-    if not pcs:
-        pcs = [0, 4, 7]
-    target_center = (low_midi + high_midi) / 2.0
-    cands_per_pc = []
-    for pc in pcs:
-        cands = [pc + 12 * oct for oct in range(2, 8) if low_midi <= pc + 12 * oct <= high_midi]
-        if not cands:
-            cands = [min([pc + 12 * oct for oct in range(2, 8)], key=lambda x: abs(x - target_center))]
-        cands_per_pc.append(cands)
+    solo_notes: list[pretty_midi.Note] = []
+    piano_notes: list[pretty_midi.Note] = []
+    guitar_notes: list[pretty_midi.Note] = []
+    accordion_notes: list[pretty_midi.Note] = []
+    pad_notes: list[pretty_midi.Note] = []
 
-    best_voicing = None
-    best_score = 1e9
-    for combo in itertools.product(*cands_per_pc):
-        span = max(combo) - min(combo)
-        center = sum(combo) / len(combo)
-        score = span * 2.5 + abs(center - target_center)
-        if score < best_score:
-            best_score = score
-            best_voicing = sorted(combo)
+    def _in_solo(t: float) -> bool:
+        return any((iv.get("start", 0) - 0.08) <= t <= (iv.get("end", 0) + 0.08) for iv in solo_intervals)
 
-    return best_voicing or [60, 64, 67]
+    for c in clusters:
+        t = c[0].start
+        c_sorted = sorted(c, key=lambda x: x.pitch)
+        k = len(c_sorted)
+        is_solo_win = _in_solo(t)
+        top_n = c_sorted[-1]
 
+        # 1. Extração do Solo Melódico (Piano Solo / Lead)
+        # Em janelas de solo (introdução, interlúdios, encerramento):
+        # A voz melódica mais aguda (pitch >= 62) é a melodia de solo!
+        # Fora de solo: fraseados/fills destacados nos agudos (pitch >= 72 com k <= 2, ou pitch >= 74)
+        is_solo_note = False
+        if is_solo_win and top_n.pitch >= 62:
+            is_solo_note = True
+        elif not is_solo_win and top_n.pitch >= 72 and (k <= 2 or top_n.pitch >= 74):
+            is_solo_note = True
 
-def enhance_piano_marking(
-    inst: pretty_midi.Instrument,
-    intervals: list[dict],
-    bpm: float = 120.0,
-    duration: float = 0.0,
-) -> pretty_midi.Instrument:
-    """Transforma o piano em uma marcação rítmica afinada, limpa e com ênfase no tempo."""
-    step = 60.0 / float(bpm)
-    step_16th = step / 4.0
-    half_step = step / 2.0
-    out_prog = inst.program if inst else 0
-    out_name = inst.name if inst and inst.name else "Piano"
-    out_inst = pretty_midi.Instrument(program=out_prog, name=out_name)
-
-    notes = [n for n in inst.notes if n.end > n.start] if inst else []
-
-    if len(notes) >= 6:
-        # Temos notas detectadas no áudio: quantizar o ataque e alinhar à tríade fundamental do acorde
-        for n in notes:
-            iv = _find_active_interval(intervals, n.start)
-            triad = iv.get("triad", iv["notes"])
-            pc = n.pitch % 12
-
-            # ALINHAMENTO HARMÔNICO DA BASE DE PIANO (MARCAÇÃO):
-            # O Piano 1 fornece a pulsação e a harmonia fundamental da música.
-            # Suas notas devem coincidir com a tríade fundamental do acorde (Root, 3ª, 5ª)
-            # para não induzir detecção de acordes suspensos (ex: Csus2, Csus4) no Acordes.exe.
-            if pc in triad:
-                pitch = n.pitch
-            else:
-                closest_pc = min(triad, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
-                octave = (n.pitch // 12) * 12
-                cands = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
-                pitch = min([c for c in cands if 0 <= c <= 127], key=lambda c: abs(c - n.pitch))
-
-            pitch = int(np.clip(pitch, 21, 108))
-
-            # Snap ESTRITO para o grid métrico do BPM (16avos / colcheias)
-            snap_8th = round(n.start / half_step) * half_step
-            snap_16th = round(n.start / step_16th) * step_16th
-            if abs(n.start - snap_8th) <= step_16th * 0.70:
-                start = max(0.0, snap_8th)
-            else:
-                start = max(0.0, snap_16th)
-
-            # Duração de semínima/colcheia marcada alinhada à grade (ênfase no tempo)
-            raw_dur = n.end - n.start
-            dur_steps = max(1, min(4, round(raw_dur / step_16th)))
-            dur = max(step_16th, dur_steps * step_16th)
-            end = start + dur
-
-            # Ênfase dinâmica no tempo (tempos fortes com mais peso)
-            is_downbeat = abs((start / step) % 2) < 0.15
-            vel = int(np.clip(n.velocity * 1.1 if is_downbeat else n.velocity, 72, 98))
-
-            out_inst.notes.append(
-                pretty_midi.Note(velocity=vel, pitch=int(pitch), start=float(start), end=float(end))
+        if is_solo_note:
+            solo_notes.append(
+                pretty_midi.Note(
+                    velocity=min(127, int(top_n.velocity * 1.15)),
+                    pitch=top_n.pitch,
+                    start=top_n.start,
+                    end=top_n.end,
+                )
             )
+            base_candidates = c_sorted[:-1]
+        else:
+            base_candidates = c_sorted
 
-        # Remove duplicatas e limita polifonia
-        out_inst.notes.sort(key=lambda x: (x.start, x.pitch))
-        cleaned = []
-        for note in out_inst.notes:
-            if cleaned and abs(cleaned[-1].start - note.start) < 0.02 and cleaned[-1].pitch == note.pitch:
-                continue
-            cleaned.append(note)
-        out_inst.notes = cleaned
+        if not base_candidates:
+            continue
 
-    else:
-        # Poucas notas detectadas: gerar marcação rítmica simples sobre as cifras
-        max_dur = max(duration, max((iv["end"] for iv in intervals), default=30.0))
-        t = 0.0
-        while t < max_dur:
-            iv = _find_active_interval(intervals, t)
-            voicing = _chord_voicing(iv.get("triad", iv["notes"]), low_midi=60, high_midi=76)
-            beat_index = int(round(t / step))
-            is_strong = (beat_index % 2 == 0)
-            vel = 88 if is_strong else 76
-            dur = step * 0.82
+        # 2. Distribuição da base de acompanhamento entre os instrumentos:
+        for n in base_candidates:
+            dur = n.end - n.start
 
-            for pitch in voicing:
-                out_inst.notes.append(
+            # A. Violão (Acoustic Guitar) - levada rítmica gravada (batidas/palhetadas na tessitura 44-72)
+            if 44 <= n.pitch <= 72 and n.velocity >= 32:
+                guitar_notes.append(
                     pretty_midi.Note(
-                        velocity=vel,
-                        pitch=pitch,
-                        start=round(t, 4),
-                        end=round(min(max_dur, t + dur), 4),
-                    )
-                )
-            t += step
-
-    return out_inst
-
-
-def enhance_other_pad(
-    inst: pretty_midi.Instrument,
-    intervals: list[dict],
-    bpm: float = 120.0,
-    duration: float = 0.0,
-) -> pretty_midi.Instrument:
-    """Transforma a faixa 'other' em cama harmônica estável (pad/sustentação afinada)."""
-    step = 60.0 / float(bpm)
-    step_16th = step / 4.0
-    out_prog = inst.program if inst else 0
-    out_name = inst.name if inst and inst.name else "Other - Acompanhamento nao identificado"
-    out_inst = pretty_midi.Instrument(program=out_prog, name=out_name)
-
-    notes = [n for n in inst.notes if n.end > n.start] if inst else []
-
-    if len(notes) >= 6:
-        # Ajusta notas existentes para sustentação consonante afinada com a tríade fundamental
-        sorted_notes = sorted(notes, key=lambda n: n.start)
-        for i, n in enumerate(sorted_notes):
-            iv = _find_active_interval(intervals, n.start)
-            triad = iv.get("triad", iv["notes"])
-            pc = n.pitch % 12
-
-            # CAMA HARMÔNICA DA FAIXA 'OTHER' (PAD / SUSTENTAÇÃO):
-            # A faixa 'other' fornece a sustentação harmônica e deve enfatizar a tríade fundamental.
-            if pc in triad:
-                pitch = n.pitch
-            else:
-                closest_pc = min(triad, key=lambda p: min(abs(p - pc), 12 - abs(p - pc)))
-                octave = (n.pitch // 12) * 12
-                cands = [closest_pc + octave - 12, closest_pc + octave, closest_pc + octave + 12]
-                pitch = min([c for c in cands if 0 <= c <= 127], key=lambda c: abs(c - n.pitch))
-
-            pitch = int(np.clip(pitch, 21, 108))
-
-            # Snap estrito para a grade de 16avos do BPM
-            start = max(0.0, round(n.start / step_16th) * step_16th)
-            raw_end = max(start + step_16th, round(n.end / step_16th) * step_16th)
-            if i + 1 < len(sorted_notes):
-                nxt_start = max(0.0, round(sorted_notes[i + 1].start / step_16th) * step_16th)
-                if start < nxt_start <= start + step * 4:
-                    end = max(raw_end, nxt_start)
-                else:
-                    end = max(raw_end, start + step)
-            else:
-                end = max(raw_end, start + step * 2)
-
-            end = max(start + step_16th, round(end / step_16th) * step_16th)
-            vel = int(np.clip(n.velocity * 0.85, 48, 70))
-            if end - start >= step_16th:
-                out_inst.notes.append(
-                    pretty_midi.Note(velocity=vel, pitch=int(pitch), start=float(start), end=float(end))
-                )
-    else:
-        # Cama harmônica contínua dos acordes da cifra
-        for iv in intervals:
-            voicing = _chord_voicing(iv.get("triad", iv["notes"]), low_midi=48, high_midi=68)
-            t_start = iv["start"]
-            t_end = iv["end"]
-            if t_end - t_start < 0.2:
-                continue
-            dur = max(0.5, t_end - t_start - 0.05)
-            for pitch in voicing:
-                out_inst.notes.append(
-                    pretty_midi.Note(
-                        velocity=64,
-                        pitch=pitch,
-                        start=round(t_start, 4),
-                        end=round(t_start + dur, 4),
+                        velocity=n.velocity,
+                        pitch=n.pitch,
+                        start=n.start,
+                        end=n.end,
                     )
                 )
 
-    out_inst.notes.sort(key=lambda x: (x.start, x.pitch))
-    return out_inst
+            # B. Piano de Acompanhamento (Base sustentada, sem petelecos)
+            if 48 <= n.pitch <= 76 and n.velocity >= 34:
+                # 'o piano que vai acompanhar vai tocar a nota sem estacar(dar petelecos) quero que ele segure um pouco'
+                p_dur = max(dur, 0.45)
+                piano_notes.append(
+                    pretty_midi.Note(
+                        velocity=int(np.clip(n.velocity * 0.95, 62, 88)),
+                        pitch=n.pitch,
+                        start=n.start,
+                        end=n.start + p_dur,
+                    )
+                )
+
+            # C. Acordeon / Sanfona (Acordes de fole sustentados)
+            if dur >= 0.38 and 52 <= n.pitch <= 78 and n.velocity >= 35:
+                accordion_notes.append(
+                    pretty_midi.Note(
+                        velocity=int(np.clip(n.velocity * 0.92, 60, 84)),
+                        pitch=n.pitch,
+                        start=n.start,
+                        end=n.end,
+                    )
+                )
+
+            # D. Synth Pad / Cama Harmônica (Camada de sustentação)
+            if dur >= 0.50 and 48 <= n.pitch <= 72:
+                pad_notes.append(
+                    pretty_midi.Note(
+                        velocity=int(np.clip(n.velocity * 0.85, 52, 72)),
+                        pitch=n.pitch,
+                        start=n.start,
+                        end=n.end,
+                    )
+                )
+
+    # Ordena as notas de cada instrumento
+    for note_list in (solo_notes, piano_notes, guitar_notes, accordion_notes, pad_notes):
+        note_list.sort(key=lambda x: (x.start, x.pitch))
+
+    return {
+        "piano_solo": solo_notes,
+        "piano_base": piano_notes,
+        "guitar": guitar_notes,
+        "accordion": accordion_notes,
+        "pad": pad_notes,
+    }
 
 
 def enhance_keyboards(
@@ -289,63 +166,224 @@ def enhance_keyboards(
     chords: Sequence[tuple[float, str]] = (),
     duration: float = 0.0,
     key: str | None = None,
+    solo_intervals: Sequence[dict] = (),
+    allow_synthetic: bool = False,
+    engine_midi_dir: str | Path | None = None,
+    solo_instrument: str = "piano",
 ) -> dict:
-    """Aprimora os dois pianos (piano.mid e other.mid) e atualiza completo.mid e instrumental.mid."""
-    midi_dir = Path(midi_dir)
-    intervals = _get_chord_intervals(chords, duration, default_key=key)
+    """Separa e orquestra o arquivo completo e os stems a partir do MIDI real do motor.
 
-    piano_path = midi_dir / "piano.mid"
+    Separa o 'Piano 1' (other.mid) que contém múltiplos instrumentos misturados em:
+    - Piano Solo (Canal 8 / Program 0)
+    - Piano Base (Canal 2 / Program 0)
+    - Violão / Acoustic Guitar (Canal 3 / Program 25)
+    - Sanfona / Accordion (Canal 5 / Program 21)
+    - Synth Pad (Canal 4 / Program 88)
+    e consolida completo.mid, instrumental.mid e karaoke.mid/kar.
+    """
+    midi_dir = Path(midi_dir)
+    source_dir = Path(engine_midi_dir) if engine_midi_dir and Path(engine_midi_dir).is_dir() else midi_dir
+
+    # Se solo_intervals não foram passados, tenta carregar palavras.json ou inferir
+    if not solo_intervals:
+        palavras_p = midi_dir.parent / "palavras.json"
+        vocal_words = []
+        if palavras_p.is_file():
+            try:
+                words_data = json.loads(palavras_p.read_text(encoding="utf-8"))
+                vocal_words = [w for w in words_data if w.get("text", "").strip() not in ("[QUEBRA]", "")]
+            except Exception:
+                pass
+        solo_intervals = detect_solo_intervals(duration=duration, detected_words=vocal_words)
+
     other_path = midi_dir / "other.mid"
+    piano_path = midi_dir / "piano.mid"
+    guitar_path = midi_dir / "guitar.mid"
+    accordion_path = midi_dir / "accordion.mid"
+    pad_path = midi_dir / "pad.mid"
+    solo_path = midi_dir / "piano_solo.mid"
     combined_path = midi_dir / "completo.mid"
     instrumental_path = midi_dir / "instrumental.mid"
+    karaoke_path = midi_dir / "karaoke.mid"
+    kar_path = midi_dir / "karaoke.kar"
 
-    piano_midi = pretty_midi.PrettyMIDI(str(piano_path)) if piano_path.is_file() else None
-    other_midi = pretty_midi.PrettyMIDI(str(other_path)) if other_path.is_file() else None
+    # Coleta todas as notas de acompanhamento reais a serem separadas diretamente da base motor_midi
+    poly_notes: list[pretty_midi.Note] = []
 
-    piano_inst = piano_midi.instruments[0] if piano_midi and piano_midi.instruments else None
-    other_inst = other_midi.instruments[0] if other_midi and other_midi.instruments else None
+    # 1. Do arquivo other.mid da base motor_midi
+    src_other = source_dir / "other.mid"
+    if src_other.is_file():
+        try:
+            oth_pm = pretty_midi.PrettyMIDI(str(src_other))
+            for inst in oth_pm.instruments:
+                if not inst.is_drum:
+                    poly_notes.extend(inst.notes)
+        except Exception:
+            pass
 
-    # Se piano não existe como arquivo separado mas há cifras, cria o piano de marcação
-    enhanced_piano_inst = enhance_piano_marking(piano_inst, intervals, bpm=bpm, duration=duration)
-    enhanced_other_inst = enhance_other_pad(other_inst, intervals, bpm=bpm, duration=duration)
+    # 2. Do piano.mid da base se já existir notas
+    src_piano = source_dir / "piano.mid"
+    if src_piano.is_file():
+        try:
+            p_pm = pretty_midi.PrettyMIDI(str(src_piano))
+            for inst in p_pm.instruments:
+                if not inst.is_drum and len(inst.notes) > len(poly_notes):
+                    poly_notes = inst.notes
+        except Exception:
+            pass
 
-    # Salva piano.mid aprimorado
-    new_piano_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm, resolution=480)
-    new_piano_midi.instruments.append(enhanced_piano_inst)
-    new_piano_midi.write(str(piano_path))
+    # 3. Se ainda vazio, lê do completo.mid da base
+    src_comb = source_dir / "completo.mid"
+    if not poly_notes and src_comb.is_file():
+        try:
+            c_pm = pretty_midi.PrettyMIDI(str(src_comb))
+            for inst in c_pm.instruments:
+                if not inst.is_drum and ("other" in inst.name.lower() or "acompanhamento" in inst.name.lower() or (inst.program == 0 and len(inst.notes) >= 50)):
+                    poly_notes = inst.notes
+                    break
+        except Exception:
+            pass
 
-    # Salva other.mid aprimorado
-    new_other_midi = pretty_midi.PrettyMIDI(initial_tempo=bpm, resolution=480)
-    new_other_midi.instruments.append(enhanced_other_inst)
-    new_other_midi.write(str(other_path))
+    # Executa a separação fiel dos instrumentos a partir das notas reais
+    separated = separate_accompaniment_instruments(
+        poly_notes, solo_intervals=solo_intervals, bpm=bpm
+    )
+
+    solo_notes = separated["piano_solo"]
+    piano_notes = separated["piano_base"]
+    guitar_notes = separated["guitar"]
+    accordion_notes = separated["accordion"]
+    pad_notes = separated["pad"]
+
+    # Configuração do instrumento do solo melódico
+    solo_norm = str(solo_instrument or "piano").lower().strip()
+    if any(g in solo_norm for g in ("electric", "eletrica", "elétrica", "guitarra", "guitar")):
+        solo_prog = 27
+        solo_name = "Electric Guitar Solo"
+    elif any(a in solo_norm for a in ("violao", "violão", "acoustic", "acustico", "acústico")):
+        solo_prog = 25
+        solo_name = "Acoustic Guitar Solo"
+    else:
+        solo_prog = 0
+        solo_name = "Piano Solo"
+
+    # Grava individualmente cada faixa MIDI
+    def _write_instrument_midi(notes_list: list[pretty_midi.Note], prog: int, name: str, out_p: Path) -> None:
+        pm = pretty_midi.PrettyMIDI(initial_tempo=bpm, resolution=480)
+        inst = pretty_midi.Instrument(program=prog, name=name)
+        inst.notes = notes_list
+        pm.instruments.append(inst)
+        pm.write(str(out_p))
+        remap_channels(out_p)
+
+    _write_instrument_midi(piano_notes, 0, "Piano", piano_path)
+    _write_instrument_midi(solo_notes, solo_prog, solo_name, solo_path)
+    if solo_prog != 0:
+        _write_instrument_midi(solo_notes, solo_prog, solo_name, midi_dir / "guitar_solo.mid")
+    _write_instrument_midi(guitar_notes, 25, "Acoustic Guitar", guitar_path)
+    _write_instrument_midi(accordion_notes, 21, "Accordion", accordion_path)
+    _write_instrument_midi(pad_notes, 88, "Synth Pad", pad_path)
 
     # Atualiza completo.mid
     if combined_path.is_file():
         comb = pretty_midi.PrettyMIDI(str(combined_path))
-        # Remove faixas antigas de piano e other (preserva faixas independentes)
-        comb.instruments = [
-            i for i in comb.instruments
-            if i.name not in ("Piano", "Piano Solo", "PianoSolo") and "other" not in i.name.casefold() and "acompanhamento" not in i.name.casefold()
+
+        # Preserva faixas rítmicas e vocais originais da base motor_midi com fidelidade absoluta
+        src_comb_f = source_dir / "completo.mid"
+        ref_comb = pretty_midi.PrettyMIDI(str(src_comb_f)) if src_comb_f.is_file() else comb
+
+        preserved_insts = [
+            i for i in ref_comb.instruments
+            if i.is_drum
+            or "drum" in i.name.lower()
+            or "chimbal" in i.name.lower()
+            or "bateria" in i.name.lower()
+            or "bass" in i.name.lower()
+            or "baixo" in i.name.lower()
+            or any(v in i.name.lower() for v in ("vocal", "choir", "voice", "voz"))
         ]
-        comb.instruments.append(enhanced_piano_inst)
-        comb.instruments.append(enhanced_other_inst)
-        solo_path = midi_dir / "piano_solo.mid"
-        if solo_path.is_file():
-            try:
-                solo_pm = pretty_midi.PrettyMIDI(str(solo_path))
-                if solo_pm.instruments:
-                    comb.instruments.append(solo_pm.instruments[0])
-            except Exception:
-                pass
+
+        new_insts = []
+        # 1. Piano Base
+        if piano_notes:
+            p_inst = pretty_midi.Instrument(program=0, name="Piano")
+            p_inst.notes = piano_notes
+            new_insts.append(p_inst)
+
+        # 2. Solo Melódico (Piano Solo, Guitarra Elétrica Solo ou Violão Solo)
+        if solo_notes:
+            s_inst = pretty_midi.Instrument(program=solo_prog, name=solo_name)
+            s_inst.notes = solo_notes
+            new_insts.append(s_inst)
+
+        # 3. Bateria e Percussão
+        for inst in preserved_insts:
+            if inst.is_drum or "drum" in inst.name.lower() or "bateria" in inst.name.lower():
+                new_insts.append(inst)
+
+        # 4. Violão (Acoustic Guitar)
+        if guitar_notes:
+            g_inst = pretty_midi.Instrument(program=25, name="Acoustic Guitar")
+            g_inst.notes = guitar_notes
+            new_insts.append(g_inst)
+
+        # 5. Sanfona (Accordion)
+        if accordion_notes:
+            a_inst = pretty_midi.Instrument(program=21, name="Accordion")
+            a_inst.notes = accordion_notes
+            new_insts.append(a_inst)
+
+        # 6. Baixo (Bass)
+        for inst in preserved_insts:
+            if "bass" in inst.name.lower() or "baixo" in inst.name.lower() or (inst.program in range(32, 40) and not inst.is_drum):
+                new_insts.append(inst)
+
+        # 7. Synth Pad
+        if pad_notes:
+            pad_inst = pretty_midi.Instrument(program=88, name="Synth Pad")
+            pad_inst.notes = pad_notes
+            new_insts.append(pad_inst)
+
+        # 8. Vocal (Choir Aahs)
+        for inst in preserved_insts:
+            if any(v in inst.name.lower() for v in ("vocal", "choir", "voice", "voz")):
+                new_insts.append(inst)
+
+        comb.instruments = new_insts
         comb.write(str(combined_path))
+        remap_channels(combined_path)
 
         # Atualiza instrumental.mid
         if instrumental_path.parent.exists():
             make_instrumental(combined_path, instrumental_path)
 
+        # Atualiza karaoke.mid e karaoke.kar preservando a letra sincronizada
+        silabas_p = midi_dir.parent / "silabas.json"
+        if silabas_p.is_file():
+            try:
+                from lyrics import export_karaoke
+                rows = json.loads(silabas_p.read_text(encoding="utf-8"))
+                export_karaoke(combined_path, rows, midi_dir)
+                if karaoke_path.is_file():
+                    kar_path.write_bytes(karaoke_path.read_bytes())
+            except Exception:
+                pass
+
+    # Aplica mixagem equilibrada com CC7 e dinâmica expressiva
+    try:
+        volumes = calculate_relative_volumes(midi_dir)
+        apply_auto_mix(midi_dir, volumes)
+    except Exception:
+        pass
+
     return {
-        "piano_notes": len(enhanced_piano_inst.notes),
-        "other_notes": len(enhanced_other_inst.notes),
-        "intervals": len(intervals),
-        "status": "pianos_harmonized_and_marked",
+        "solo_instrument": solo_name,
+        "solo_program": solo_prog,
+        "piano_notes": len(piano_notes),
+        "piano_solo_notes": len(solo_notes),
+        "guitar_notes": len(guitar_notes),
+        "accordion_notes": len(accordion_notes),
+        "pad_notes": len(pad_notes),
+        "total_source_notes": len(poly_notes),
+        "status": "real_notes_separated_into_instruments",
     }

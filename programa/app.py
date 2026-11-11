@@ -684,6 +684,17 @@ with st.expander("Voz, volumes e arquivos extras", expanded=False):
     with tab_voice:
         vocal_label = st.selectbox("Instrumento da melodia", ["Choir Aahs", "Flute"], index=1)
         vocal_program = 52 if vocal_label == "Choir Aahs" else 73
+        solo_label = st.selectbox(
+            "Instrumento do Solo (introdução e frases)",
+            ["Piano (Padrão)", "Guitarra Elétrica", "Violão"],
+            index=0,
+            help="Escolha o timbre do solo melódico que toca na introdução, interlúdios e frases de destaque.",
+        )
+        solo_instrument = {
+            "Piano (Padrão)": "piano",
+            "Guitarra Elétrica": "electric_guitar",
+            "Violão": "acoustic_guitar",
+        }[solo_label]
         language_label = st.selectbox(
             "Idioma da letra", ["Português", "English", "Español", "Detectar automaticamente"]
         )
@@ -710,6 +721,7 @@ with st.expander("Voz, volumes e arquivos extras", expanded=False):
             },
             allow_mute=True,
         )
+        mix_settings["solo_instrument"] = solo_instrument
 
     with tab_more:
         reference_upload = st.file_uploader(
@@ -862,6 +874,7 @@ if start:
                 else None
             ),
             mix_settings=mix_settings,
+            solo_instrument=solo_instrument,
             musical_reference=reference_path,
             render_samples=render_samples,
             audio_path=audio_path,
@@ -971,11 +984,15 @@ if st.session_state.get("last_result"):
         "completo.mid",
         "instrumental.mid",
         "piano_solo.mid",
+        "guitar_solo.mid",
         "piano.mid",
+        "guitar.mid",
+        "accordion.mid",
+        "pad.mid",
         "bass.mid",
         "drums.mid",
+        "hihat.mid",
         "vocals.mid",
-        "guitar.mid",
         "other.mid",
     ]
     by_name = {f.name: f for f in midi_files if f.is_file()}

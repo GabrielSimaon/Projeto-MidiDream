@@ -21,15 +21,15 @@ from lyrics import _word_tokens, _interpolate_manual_words
 MAJOR = (0, 2, 4, 5, 7, 9, 11)
 MINOR = (0, 2, 3, 5, 7, 8, 10)
 LEVELS = {
-    "gentle": (0.45, 0.065),
-    "balanced": (0.60, 0.085),
-    "strict": (0.72, 0.12),
+    "gentle": (0.28, 0.035),
+    "balanced": (0.35, 0.045),
+    "strict": (0.45, 0.060),
     # "chords": filtro forte + travamento nas cifras (chord_lock_notes), abaixo.
-    "chords": (0.72, 0.12),
+    "chords": (0.45, 0.060),
 }
-MAX_VOICES = 5  # Notas simultâneas por faixa de acompanhamento; acima disso vira "lama".
+MAX_VOICES = 8  # Permite acordes completos de violão (6 cordas) e piano sem cortar vozes.
 MAX_BEATS = 6  # Nenhuma nota de acompanhamento dura mais que isso (sem sustentos de 30 s).
-LOW_LIMIT = 48  # Dó3: abaixo disso o piano/violão brigam com o baixo.
+LOW_LIMIT = 36  # Dó2: preserva bordões de violão (E2=40) e graves naturais do piano.
 
 
 @dataclass
@@ -126,41 +126,99 @@ def infer_scale(notes):
 def key_scale(key):
     if not key or key == "auto":
         return None
-    match = re.fullmatch(r"([A-G])([#b]?) (maior|menor)", key)
-    if not match:
-        raise ValueError("Tonalidade inválida. Use, por exemplo, C maior ou A menor.")
-    root, accidental, mode = match.groups()
-    tonic = (ROOTS[root] + {"": 0, "#": 1, "b": -1}[accidental]) % 12
-    return {(tonic + degree) % 12 for degree in (MAJOR if mode == "maior" else MINOR)}
+    key_str = str(key).strip()
+    match = re.fullmatch(r"([A-G])([#b]?) (maior|menor)", key_str, re.IGNORECASE)
+    if match:
+        root, accidental, mode = match.groups()
+        tonic = (ROOTS[root.upper()] + {"": 0, "#": 1, "b": -1}[accidental]) % 12
+        return {(tonic + degree) % 12 for degree in (MAJOR if mode.lower() == "maior" else MINOR)}
+    match_short = re.fullmatch(r"([A-G])([#b]?)(m|min|minor|maj|major)?", key_str, re.IGNORECASE)
+    if match_short:
+        root, accidental, mode = match_short.groups()
+        is_minor = bool(mode and mode.lower() in ("m", "min", "minor"))
+        tonic = (ROOTS[root.upper()] + {"": 0, "#": 1, "b": -1}[accidental]) % 12
+        return {(tonic + degree) % 12 for degree in (MINOR if is_minor else MAJOR)}
+    raise ValueError("Tonalidade inválida. Use, por exemplo, C maior ou A menor.")
 
 
-def timed_chords(text, marks, detected_words, duration):
-    """Relaciona cifras às palavras alinhadas ou à linha do tempo da música."""
+def timed_chords(text, marks, detected_words, duration, bpm=120.0):
+    """Relaciona cifras às palavras alinhadas ou à linha do tempo da música.
+    
+    Garante que os acordes avancem no tempo compasso a compasso, impedindo que múltiplos
+    acordes colapsem no mesmo segundo e façam o piano tocar apenas uma nota durante a música toda.
+    """
     aligned = _interpolate_manual_words(
         [{"text": token} for token in _word_tokens(text)], detected_words, duration
     ) if detected_words else []
-    events = []
-    text_len = max(1, len(text))
+
+    if not aligned:
+        events = []
+        has_explicit = any(m.get("seconds") is not None for m in marks)
+        if has_explicit:
+            for mark in marks:
+                s = mark.get("seconds")
+                if s is not None and 0 <= s < duration:
+                    events.append((float(s), mark["symbol"]))
+        elif marks and duration > 0:
+            step = duration / len(marks)
+            events = [(i * step, m["symbol"]) for i, m in enumerate(marks)]
+        return sorted(events)
+
+    t_first_word = float(aligned[0]["start"]) if aligned else 0.0
+    step_beat = 60.0 / max(30.0, float(bpm))
+    min_chord_step = step_beat * 1.5
+
+    marks_with_time = []
+    intro_marks = []
+    lyric_marks = []
+
     for mark in marks:
-        seconds = mark.get("seconds")
-        if seconds is None:
-            if aligned:
-                word_idx = len(_word_tokens(text[: mark["offset"]]))
-                if word_idx < len(aligned):
-                    seconds = aligned[word_idx]["start"]
-                else:
-                    seconds = aligned[-1]["end"]
-            elif duration > 0:
-                fraction = min(1.0, max(0.0, mark["offset"] / text_len))
-                seconds = fraction * duration
+        if mark.get("seconds") is not None:
+            marks_with_time.append((float(mark["seconds"]), mark["symbol"]))
+            continue
+        word_idx = len(_word_tokens(text[: mark["offset"]]))
+        if word_idx == 0 and len(marks) > 1 and len(aligned) > 1:
+            intro_marks.append(mark["symbol"])
+        else:
+            w_time = aligned[min(word_idx, len(aligned) - 1)]["start"]
+            lyric_marks.append((float(w_time), mark["symbol"]))
+
+    if intro_marks:
+        n_intro = len(intro_marks)
+        if n_intro == 1 and not lyric_marks:
+            marks_with_time.append((round(t_first_word, 3), intro_marks[0]))
+        elif n_intro == 1 and lyric_marks:
+            # Acorde isolado antes da letra começa no início se a introdução for longa
+            start_t = 0.0 if t_first_word >= 2.0 else t_first_word
+            marks_with_time.append((round(start_t, 3), intro_marks[0]))
+        elif t_first_word >= n_intro * step_beat * 1.0:
+            step_intro = t_first_word / n_intro
+            for i, sym in enumerate(intro_marks):
+                marks_with_time.append((round(i * step_intro, 3), sym))
+        else:
+            bar_dur = step_beat * 4.0
+            for i, sym in enumerate(intro_marks):
+                marks_with_time.append((round(i * bar_dur, 3), sym))
+
+    marks_with_time.sort(key=lambda m: m[0])
+    last_time = marks_with_time[-1][0] + min_chord_step if marks_with_time else 0.0
+
+    for w_time, sym in lyric_marks:
+        actual_time = max(w_time, last_time)
+        if actual_time < duration:
+            marks_with_time.append((round(actual_time, 3), sym))
+            last_time = actual_time + min_chord_step
+
+    marks_with_time.sort(key=lambda m: m[0])
+    deduped = []
+    for t, sym in marks_with_time:
+        if 0 <= t < duration:
+            if deduped and abs(deduped[-1][0] - t) < 0.10:
+                deduped[-1] = (t, sym)
             else:
-                continue
-        if 0 <= seconds < duration:
-            events.append((float(seconds), mark["symbol"]))
-    if not events and marks and not any(m.get("seconds") is not None for m in marks) and duration > 0:
-        step = duration / len(marks)
-        events = [(i * step, m["symbol"]) for i, m in enumerate(marks)]
-    return sorted(events)
+                deduped.append((t, sym))
+
+    return deduped
 
 
 def filter_midi(
@@ -230,11 +288,11 @@ def filter_midi(
                 bisect_left(starts, note.start - window) : bisect_right(starts, note.start + window)
             ]
             reference = float(np.percentile([other.velocity for other in local], 85))
-            weak = note.velocity < max(8.0, reference * relative)
+            weak = note.velocity < max(8.0, reference * relative) and note.velocity < 28
             weak_flags[note.on_index] = weak
             duration = note.end - note.start
-            # Um trecho inteiro suave não é silenciado: a comparação é local.
-            if weak and duration < minimum:
+            # Remove apenas ruídos fantasmas espúrios reais (muito curtos e fracos)
+            if weak and duration < minimum and duration < 0.040:
                 decisions[note.on_index] = (None, "weak_fragment")
                 continue
             active_chord = set()
@@ -248,17 +306,18 @@ def filter_midi(
             }
             allowed = scale | active_chord | sung
             pitch = note.pitch
-            # Fragmentos cromáticos sem sustentação não viram acordes novos.
+            # Fragmentos dissonantes só são removidos se o tom foi explicitado e a nota for ruído fraco
             if (
-                correct_pitch and allowed and pitch % 12 not in allowed
-                and duration < min(0.18, beat * 0.4)
-                and note.velocity < reference * 0.60
+                correct_pitch and key and allowed and pitch % 12 not in allowed
+                and duration < min(0.12, beat * 0.25)
+                and note.velocity < 25
             ):
                 decisions[note.on_index] = (None, "dissonant_fragment")
                 continue
             if (
                 weak
                 and correct_pitch
+                and key
                 and (scale or active_chord)
                 and allowed
                 and pitch % 12 not in allowed

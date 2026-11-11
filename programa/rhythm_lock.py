@@ -1,19 +1,34 @@
-"""Arranjo simplificado: baixo no bumbo e acordes em colcheias."""
+"""Sincroniza bumbo ao baixo, preserva o baixo contínuo e arranja acordes na grade."""
 
 import copy
 import numpy as np
 
 
 def lock_rhythm(instruments, bpm, grid_times=None):
-    """Seleciona alturas detectadas; não preenche silêncios com notas novas."""
-    # Uma semicolcheia dura 1/4 de batida (grade métrica de 16avos do BPM).
-    step = 60 / float(bpm) / 4.0
+    """Sincroniza o bumbo ao baixo e alinha o ritmo na métrica do BPM, preservando âncora de fase."""
+    bpm_val = float(bpm) if bpm and float(bpm) > 0 else 120.0
+    # Se o BPM informado ou detectado for em half-time (< 95), ajusta a divisão para manter a resolução real da música
+    div = 4.0 if bpm_val < 95.0 else 2.0
+    step = 60.0 / bpm_val / div
+
+    times_arr = None
     anchor = 0.0
+    if grid_times is not None and len(grid_times) > 1:
+        times_arr = np.asarray(grid_times, dtype=float)
+        anchor = float(times_arr[0])
 
     def snap(t):
-        return max(0.0, round(t / step) * step)
+        if times_arr is not None and len(times_arr):
+            idx = int(np.searchsorted(times_arr, t))
+            cands = times_arr[max(0, idx - 1) : min(len(times_arr), idx + 2)]
+            if len(cands) > 0:
+                closest = float(min(cands, key=lambda v: abs(v - t)))
+                # Apenas atrai se a nota estiver dentro da janela métrica razoável (evita deformar síncopes)
+                if abs(closest - t) <= step * 0.70:
+                    return closest
+        return max(0.0, anchor + round((t - anchor) / step) * step)
 
-    # No padrão General MIDI, 35 e 36 são os dois sons de bumbo.
+    drum_inst = next((i for i in instruments if i.is_drum), None)
     kicks = sorted(
         {
             round(n.start, 6)
@@ -23,7 +38,10 @@ def lock_rhythm(instruments, bpm, grid_times=None):
             if n.pitch in (35, 36)
         }
     )
+
     report = {}
+    final_bass_starts = []
+
     for inst in instruments:
         name = inst.name.casefold()
         bass = "bass" in name or "baixo" in name
@@ -33,19 +51,19 @@ def lock_rhythm(instruments, bpm, grid_times=None):
         notes = sorted(inst.notes, key=lambda n: (n.start, n.pitch))
         out = []
         if bass:
-            # O baixo só toca nos ataques do bumbo; sem bateria, usa a grade.
-            attacks = kicks if kicks else sorted({snap(n.start) for n in notes})
+            # Preserva os ataques detectados do baixo e alinha com os ataques do bumbo
+            # Ignora ataques fantasmas na introdução antes do início real da bateria/baixo
+            first_kick = kicks[0] if kicks else 0.0
+            attacks = sorted(set(kicks) | {snap(n.start) for n in notes})
             previous = None
             for t in attacks:
-                # Só escolhe uma altura já detectada perto do ataque: não inventa notas.
                 options = [
                     n
                     for n in notes
-                    if n.start <= t + (0.075 if kicks else step / 2 + 0.001) and n.end >= t + 0.035
+                    if n.start <= t + (0.12 if kicks else step / 2 + 0.001) and n.end >= t + 0.035
                 ]
                 if not options:
                     continue
-                # A pontuação favorece intensidade, proximidade temporal e continuidade da linha.
                 n = max(
                     options,
                     key=lambda n: (
@@ -58,13 +76,12 @@ def lock_rhythm(instruments, bpm, grid_times=None):
                 new = copy.copy(n)
                 new.start = t
                 new.end = max(t + 0.06, n.end)
-                # Encerra a nota anterior para manter o baixo monofônico.
                 if out:
                     out[-1].end = min(out[-1].end, t)
                 out.append(new)
                 previous = n.pitch
             if out:
-                # Sustentação contínua de groove do baixo (alongamento musical de notas)
+                # Sustentação contínua de groove do baixo (elimina paradas repentinas)
                 step_beat = 60.0 / float(bpm)
                 for i in range(len(out)):
                     curr = out[i]
@@ -77,8 +94,9 @@ def lock_rhythm(instruments, bpm, grid_times=None):
                             curr.end = max(curr.end, curr.start + min(0.85, step_beat * 1.5))
                     else:
                         curr.end = max(curr.end, curr.start + min(1.0, step_beat * 2.0))
+                final_bass_starts = [n.start for n in out]
         else:
-            # Agrupa os ataques de guitarra na grade de semicolcheias (16avos)
+            # Agrupa os ataques de guitarra na grade métrica respeitando a âncora
             buckets = {}
             for n in notes:
                 t = snap(n.start)
@@ -99,7 +117,6 @@ def lock_rhythm(instruments, bpm, grid_times=None):
                     reverse=True,
                 )
                 for n in ranked:
-                    # Limita a duração do ataque de guitarra para não embolar com a próxima batida
                     raw_dur = max(step, n.end - n.start)
                     dur = max(step, min(nxt_t - t, max(step * 2.0, snap(raw_dur))))
                     end = max(t + step, t + snap(dur))
@@ -120,4 +137,20 @@ def lock_rhythm(instruments, bpm, grid_times=None):
             "after": len(inst.notes),
             "kick_follow": bool(bass and kicks),
         }
+
+    # Sincroniza o bumbo da bateria para bater junto com o ataque do baixo quando próximos
+    # 'eu queria que o bumbo batesse junto com o baixo(mas n toda vez tmb) so pra alinhar a bateria ao todo'
+    if drum_inst and final_bass_starts:
+        aligned_drum = []
+        for n in drum_inst.notes:
+            new_note = copy.copy(n)
+            if n.pitch in (35, 36):
+                close = [b for b in final_bass_starts if abs(n.start - b) <= 0.085]
+                if close:
+                    new_start = close[0]
+                    new_note.start = new_start
+                    new_note.end = new_start + max(0.05, n.end - n.start)
+            aligned_drum.append(new_note)
+        drum_inst.notes = sorted(aligned_drum, key=lambda n: (n.start, n.pitch))
+
     return report

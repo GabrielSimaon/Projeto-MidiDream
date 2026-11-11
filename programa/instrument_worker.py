@@ -155,7 +155,7 @@ def main():
             shutil.copy2(file, output / file.name)
             copied.append(file.name)
         elif kind in ("piano", "guitar", "accordion", "acoustic_guitar", "electric_guitar"):
-            # Uma fonte já separada pelo Demucs ou fornecida pelo usuário é sempre preservada em sua faixa própria!
+            # Uma fonte já separada pelo Demucs ou fornecida pelo usuário é sempre preservada em sua faixa própria
             y, _ = librosa.load(str(file), sr=32000, mono=True)
             sf.write(output / (kind + ".wav"), y, 32000, subtype="FLOAT")
             preserved.append(kind)
